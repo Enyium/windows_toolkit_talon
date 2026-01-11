@@ -52,10 +52,10 @@ class MainActions:
         #i `key_wait` only applies when modifiers are involved, which isn't the case here.
 
         utf16le_bytes = text.encode("utf-16-le", errors="surrogatepass")
-        num_code_units = len(utf16le_bytes) // 2
+        code_units = memoryview(utf16le_bytes).cast("@H")
 
         events = (
-            INPUT * (2 if hold_key_unconditionally else (num_code_units * 2))
+            INPUT * (2 if hold_key_unconditionally else (len(code_units) * 2))
             #i Down and up for every code unit.
         )()
         num_events_to_send = 0
@@ -105,7 +105,7 @@ class MainActions:
                 # Reset event array with regard to next flush.
                 num_events_to_send = 0
 
-        for (code_unit,) in struct.iter_unpack("<H", utf16le_bytes):
+        for code_unit in code_units:
             vk = VKS_OF_ASCII_CODES.get(code_unit, 0)
             is_vk_event = bool(vk)
 
