@@ -18,6 +18,12 @@ mod.setting(
     default=False,
     desc="Whether the `key_hold` setting applies to characters directly sent as themselves by the `insert()` override (as opposed to their respective keys). This is necessary in certain apps - specifically those based on the Qt framework - because they otherwise may drag non-BMP characters (> U+FFFF) to an earlier position when the app didn't have enough time to process the characters before the non-BMP characters.",
 )
+mod.setting(
+    "key_hold_applies_until_esc",
+    type=bool,
+    default=False,
+    desc="Whether the `key_hold` setting applies to everything until the last request to press the Esc key. This can be necessary in some apps to successfully dismiss a suggestion window, because the Esc event needs to coincide with its appearance. Note that two `insert()`s in quick succession - first a fast long one, then a short one with Esc - may still cause problems.",
+)
 
 ctx = Context()
 
@@ -48,14 +54,15 @@ class MainActions:
         """
 
         key_hold_duration = settings.get("key_hold") / 1000
-        hold_key_unconditionally = settings.get("user.key_hold_applies_to_chars")
+        hold_keys_unconditionally = settings.get("user.key_hold_applies_to_chars")
+        hold_keys_until_esc = settings.get("user.key_hold_applies_until_esc")
         #i `key_wait` only applies when modifiers are involved, which isn't the case here.
 
         utf16le_bytes = text.encode("utf-16-le", errors="surrogatepass")
         code_units = memoryview(utf16le_bytes).cast("@H")
 
         events = (
-            INPUT * (2 if hold_key_unconditionally else (len(code_units) * 2))
+            INPUT * (2 if hold_keys_unconditionally else (len(code_units) * 2))
             #i Down and up for every code unit.
         )()
         num_events_to_send = 0
@@ -105,7 +112,16 @@ class MainActions:
                 # Reset event array with regard to next flush.
                 num_events_to_send = 0
 
-        for code_unit in code_units:
+        first_fast_code_unit_index = 0
+        if hold_keys_until_esc and not hold_keys_unconditionally:
+            # Cause slow mode until last non-character event that may cause problems.
+            for i in range(len(code_units) - 1, -1, -1):
+                if code_units[i] == 0x1B:
+                #i Esc can be associated with suggestion window that we may not be able to dismiss by simply enqueuing ahead of time.
+                    first_fast_code_unit_index = i + 1
+                    break
+
+        for i, code_unit in enumerate(code_units):
             vk = VKS_OF_ASCII_CODES.get(code_unit, 0)
             is_vk_event = bool(vk)
 
@@ -126,7 +142,7 @@ class MainActions:
                 scancode_or_code_unit = code_unit
 
             for is_down_event in [True, False]:
-                if not is_down_event and (hold_key_unconditionally or is_vk_event):
+                if not is_down_event and (hold_keys_unconditionally or i < first_fast_code_unit_index or is_vk_event):
                     flush()
                     actions.sleep(key_hold_duration)
 
