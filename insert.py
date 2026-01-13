@@ -1,169 +1,327 @@
 import ctypes
 import struct
+import time
 from typing import TYPE_CHECKING
 
 from talon import Context, Module, actions, app, settings, ui
 
 if app.platform == "windows" or TYPE_CHECKING:
+    from ctypes import wintypes
+
+    import pywintypes
     import win32api
     import win32con
+    import win32gui
+    import winerror
 
-    from .winapi import INPUT, GUITHREADINFO, MAPVK_VK_TO_VSC_EX, user32
+    from .winapi import INPUT, GUITHREADINFO, MAPVK_VK_TO_VSC_EX, SMTO_ERRORONEXIT, user32
 
 mod = Module()
 
 mod.setting(
-    "key_hold_applies_to_chars",
-    type=bool,
-    default=False,
-    desc="Whether the `key_hold` setting applies to characters directly sent as themselves by the `insert()` override (as opposed to their respective keys). This is necessary in certain apps - specifically those based on the Qt framework - because they otherwise may drag non-BMP characters (> U+FFFF) to an earlier position when the app didn't have enough time to process the characters before the non-BMP characters.",
+    "char_pause_ms",
+    type=float,
+    default=0.0,
+    desc="Milliseconds to sleep per character directly sent as itself (as opposed to its respective keys). The setting `user.stable_caret_ms_until_idle` may prevent the per-character pauses to apply.",
 )
 mod.setting(
-    "key_hold_applies_until_esc",
+    "stable_caret_ms_until_idle",
+    type=float,
+    default=0.0,
+    desc="Milliseconds the caret (text input cursor) coordinates must not change until the target window is recognized as ready to receive further input. Not every app reports its carets in a performantly queryable manner. If it doesn't or stops reporting them mid-insertion, `user.char_pause_ms` is used for the rest of the insertion; but this may come too late for certain text. A setting value of 0 expressly turns the feature off.",
+)
+mod.setting(
+    "abort_insert_merely_on_app_change",
     type=bool,
     default=False,
-    desc="Whether the `key_hold` setting applies to everything until the last request to press the Esc key. This can be necessary in some apps to successfully dismiss a suggestion window, because the Esc event needs to coincide with its appearance. Note that two `insert()`s in quick succession - first a fast long one, then a short one with Esc - may still cause problems.",
+    desc="Whether `insert()` should only abort when the active app is changed. Otherwise, it will abort when the active window is changed. This is useful when a suggestion window would otherwise cause abortion.",
 )
 
 ctx = Context()
 
-VKS_OF_ASCII_CODES = {
-    # Keyboard-layout-invariant virtual-key codes that don't work with the `KEYEVENTF_UNICODE` flag.
-    0x08: win32con.VK_BACK,
-    0x09: win32con.VK_TAB,
-    0x0A: win32con.VK_RETURN,
-    0x1B: win32con.VK_ESCAPE,
-}
+#. Seconds until insertion is aborted.
+INSERTION_TIMEOUT = 30
 
 
 @ctx.action_class("main")
 class MainActions:
     def insert(text: str):
-        """An override of Talon's original `insert()` function that won't cause problems with dead keys and can be much faster.
+        """A reimplementation and replacement of Talon's original function that won't cause problems with dead keys, is more resilient against interference, and is often much faster.
 
-        Characters are sent to the active window as themselves and not as their respective key presses, the latter of which are keyboard-layout-dependent. The only real key events simulated are for these keys:
+        Characters are sent as themselves, and not as their respective key presses, which are keyboard-layout-dependent. This also comes with independence from the caps lock state. The only real key events simulated are for these keys:
 
         - Backspace (`\b`, `\N{BS}`, `\N{BACKSPACE}`)
         - Tab (`\t`, `\N{TAB}`)
         - Enter (`\n`, `\N{NEW LINE}`)
-        - Esc (`\x1b`, `\N{ESC}`, `\N{ESCAPE}`; can be used before Enter or Tab to prevent confirming a suggestion)
+        - Esc (`\x1b`, `\N{ESC}`, `\N{ESCAPE}`; can be used before Tab or Enter to prevent confirming a suggestion)
 
-        Talon's setting `key_hold` still applies. Use the setting `user.key_hold_applies_to_chars` to optimize for speed or compatibility.
-
-        The function also aborts insertion when the active window changes, when a traditional OS menu is active, and when a modifier key is held down. This is especially effective in slow mode, i.e., when the setting is `true`.
+        Talon's setting `key_hold` still applies for those keys. Additionally, you can use the settings `user.char_pause_ms`, `user.stable_caret_ms_until_idle`, and `user.abort_insert_merely_on_app_change`.
         """
 
-        key_hold_duration = settings.get("key_hold") / 1000
-        hold_keys_unconditionally = settings.get("user.key_hold_applies_to_chars")
-        hold_keys_until_esc = settings.get("user.key_hold_applies_until_esc")
+        session = InsertSession()
+        session.run(text)
+
+
+class InsertSession:
+    VKS_OF_SELECT_ASCII_CODES = {
+        # Keyboard-layout-invariant virtual-key codes that don't work with the `KEYEVENTF_UNICODE` flag.
+        0x08: win32con.VK_BACK,
+        0x09: win32con.VK_TAB,
+        0x0A: win32con.VK_RETURN,
+        0x1B: win32con.VK_ESCAPE,
+    }
+
+    def __init__(self):
+        self.start_time = None
+
+        self.key_hold_duration = settings.get("key_hold") / 1000
+        self.char_pause_duration = settings.get("user.char_pause_ms") / 1000
+        self.stable_caret_duration = settings.get("user.stable_caret_ms_until_idle") / 1000
+        self.must_wait_for_stable_caret = self.stable_caret_duration > 0
+        self.abort_on_window_xor_app_change = not settings.get("user.abort_insert_merely_on_app_change")
         #i `key_wait` only applies when modifiers are involved, which isn't the case here.
 
+        self.events = None
+        self.num_events = 0
+
+        active_window = ui.active_window()
+        self.insertion_hwnd = active_window.id
+        self.insertion_pid = active_window.app.pid
+
+        self.gui_thread_info = GUITHREADINFO(cbSize=ctypes.sizeof(GUITHREADINFO))
+
+    def run(self, text):
+        # Text to UTF-16 code units.
         utf16le_bytes = text.encode("utf-16-le", errors="surrogatepass")
         code_units = memoryview(utf16le_bytes).cast("@H")
+        if not _is_well_formed_utf16(code_units):
+            raise ValueError("Malformed UTF-16.")
 
-        events = (
-            INPUT * (2 if hold_keys_unconditionally else (len(code_units) * 2))
-            #i Down and up for every code unit.
-        )()
-        num_events_to_send = 0
+        # Create event queue.
+        if not self.must_wait_for_stable_caret and self.char_pause_duration > 0:
+            # At most last up and next down.
+            capacity = 2
+        else:
+            # Down and up for every code unit.
+            capacity = len(code_units) * 2
+        self.events = (INPUT * capacity)()
+        self.num_events = 0
 
-        insertion_window_id = ui.active_window().id
-        gui_thread_info = GUITHREADINFO(cbSize=ctypes.sizeof(GUITHREADINFO))
-
-        def flush():
-            nonlocal num_events_to_send, gui_thread_info
-
-            if num_events_to_send > 0:
-                # Check for window change.
-                if ui.active_window().id != insertion_window_id:
-                    raise RuntimeError(
-                        "Active window changed during text insertion. Insertion aborted."
-                    )
-
-                # Check for active menu.
-                success = user32.GetGUIThreadInfo(0, ctypes.byref(gui_thread_info))
-                if not success:
-                    raise ctypes.WinError(ctypes.get_last_error())
-                if gui_thread_info.flags & win32con.GUI_INMENUMODE:
-                    raise RuntimeError("Menu active. Text insertion aborted.")
-                #i This technique only works for traditional Win32 menus incl. a window's system menu. The universal way would be to check whether `talon.windows.ax.get_focused_element().control_type` is `"MenuBar"` or `"MenuItem"`. But unfortunately, this API is very slow and would introduce a delay of up to about 83 ms according to the author's measurements before every flush.
-
-                # Check for held-down modifier keys.
-                if (
-                    win32api.GetAsyncKeyState(win32con.VK_CONTROL) < 0
-                    or win32api.GetAsyncKeyState(win32con.VK_SHIFT) < 0
-                    or win32api.GetAsyncKeyState(win32con.VK_MENU) < 0  # Alt.
-                    or win32api.GetAsyncKeyState(win32con.VK_LWIN) < 0
-                    or win32api.GetAsyncKeyState(win32con.VK_RWIN) < 0
-                ):
-                    raise RuntimeError(
-                        "Modifier key held down. Text insertion aborted."
-                    )
-
-                # Send prepared events.
-                num_events_sent = user32.SendInput(
-                    num_events_to_send, events, ctypes.sizeof(INPUT)
-                )
-                if num_events_sent == 0:
-                    raise ctypes.WinError(ctypes.get_last_error())
-                if num_events_sent != num_events_to_send:
-                    raise RuntimeError("Failed to send all keyboard input requests.")
-
-                # Reset event array with regard to next flush.
-                num_events_to_send = 0
-
-        first_fast_code_unit_index = 0
-        if hold_keys_until_esc and not hold_keys_unconditionally:
-            # Cause slow mode until last non-character event that may cause problems.
-            for i in range(len(code_units) - 1, -1, -1):
-                if code_units[i] == 0x1B:
-                #i Esc can be associated with suggestion window that we may not be able to dismiss by simply enqueuing ahead of time.
-                    first_fast_code_unit_index = i + 1
-                    break
+        # Send events.
+        self.start_time = time.perf_counter()
+        had_surrogate = False
 
         for i, code_unit in enumerate(code_units):
-            vk = VKS_OF_ASCII_CODES.get(code_unit, 0)
+            vk = InsertSession.VKS_OF_SELECT_ASCII_CODES.get(code_unit)  # Never 0.
             is_vk_event = bool(vk)
 
-            if code_unit < 0x20 and not is_vk_event:
+            is_printable = code_unit >= 0x20 and code_unit != 0x7F
+
+            if not (is_vk_event or is_printable):
                 continue
 
-            # is_surrogate = code_unit >= 0xD800 and code_unit <= 0xDFFF
+            is_surrogate = code_unit >= 0xD800 and code_unit <= 0xDFFF
 
-            if is_vk_event:
-                scancode = win32api.MapVirtualKey(vk, MAPVK_VK_TO_VSC_EX)
-                has_e0_extended_scan_code = (scancode & 0xFF00) == 0xE000
-                scancode_or_code_unit = scancode
-                #i AI GPT-5.2 thinks `wScan` must not contain the extended-prefix. But the docs for `KEYEVENTF_EXTENDEDKEY` seem to say otherwise.
-                #i
-                #i We just ignore 0 on missing translation, because we don't use `KEYEVENTF_SCANCODE`, but primarily rely on the virtual-key code. The scancode is just for maximizing compatibility.
+            for up in [False, True]:
+                if not up:
+                    #TODO: WITH SUITABLE TEST APP: With regard to suggestion windows, it could be necessary to also wait for caret stabilization before `\N{esc}`, `\t` and `\n` (VS Code confirms with Tab, Notepad++ also with Enter). But a test app would be needed that has suggestion windows, reports its caret, and benefits from caret stabilization. Depending on the settings, these additional pauses could undesirably add to `key_hold` pauses.
+                    if self.must_wait_for_stable_caret and is_surrogate and not had_surrogate:
+                        self.flush()
+                        self.wait_for_stable_caret()
+                        #i In Qt apps, sending non-BMP characters (those consisting of surrogates) *after* BMP characters (<= U+FFFF) without waiting until the caret has stabilized (e.g., by using a single `SendInput()` call) can lead to the non-BMP characters being placed *before* the BMP characters. This is why we start a new chunk at every transition from BMP to non-BMP characters and wait for the caret to stabilize before continuing. (The other transition is unproblematic.)
+                else:
+                    if is_vk_event:
+                        if self.key_hold_duration > 0:
+                            self.flush()
+                            actions.sleep(self.key_hold_duration)
+                    else:
+                        if not self.must_wait_for_stable_caret and self.char_pause_duration > 0:
+                            self.flush()
+                            actions.sleep(self.char_pause_duration)
+
+                if is_vk_event:
+                    self.push_vk_event(vk, up)
+                else:
+                    self.push_utf16_code_unit_event(code_unit, up)
+
+            if i % 200 == 0 and time.perf_counter() - self.start_time >= INSERTION_TIMEOUT:
+                raise RuntimeError("Text insertion took too long.")
+
+            had_surrogate = is_surrogate
+
+        must_wait = self.must_wait_for_stable_caret and self.num_events > 1  # More than single up-event.
+        self.flush()
+        if must_wait:
+            self.wait_for_stable_caret()
+
+    def push_vk_event(self, vk: int, up: bool):
+        scancode = win32api.MapVirtualKey(vk, MAPVK_VK_TO_VSC_EX)
+        has_e0_extended_scan_code = (scancode & 0xFF00) == 0xE000
+        #i AI GPT-5.2 thinks `wScan` must not contain the extended-prefix. But the docs for `KEYEVENTF_EXTENDEDKEY` seem to say otherwise.
+        #i
+        #i We just ignore 0 on missing translation, because we don't use `KEYEVENTF_SCANCODE`, but primarily rely on the virtual-key code. The scancode is just for maximizing compatibility.
+
+        event = self.events[self.num_events]
+
+        event.type = win32con.INPUT_KEYBOARD
+        event.ki.wVk = vk
+        event.ki.wScan = scancode
+
+        flags = 0
+        if has_e0_extended_scan_code:
+            flags |= win32con.KEYEVENTF_EXTENDEDKEY
+        if up:
+            flags |= win32con.KEYEVENTF_KEYUP
+        event.ki.dwFlags = flags
+
+        event.ki.time = 0
+        event.ki.dwExtraInfo = 0
+
+        self.num_events += 1
+    
+    def push_utf16_code_unit_event(self, code_unit: int, up: bool):
+        event = self.events[self.num_events]
+
+        event.type = win32con.INPUT_KEYBOARD
+        event.ki.wVk = 0
+        event.ki.wScan = code_unit
+
+        flags = win32con.KEYEVENTF_UNICODE
+        if up:
+            flags |= win32con.KEYEVENTF_KEYUP
+        event.ki.dwFlags = flags
+
+        event.ki.time = 0
+        event.ki.dwExtraInfo = 0
+
+        self.num_events += 1
+
+    def flush(self):
+        if self.num_events <= 0:
+            return
+
+        # Check for various obstacles.
+        if self.abort_on_window_xor_app_change:
+            if ui.active_window().id != self.insertion_hwnd:
+                raise RuntimeError("Active window changed during text insertion. Insertion aborted.")
+        else:
+            if ui.active_app().pid != self.insertion_pid:
+                raise RuntimeError("Active app changed during text insertion. Insertion aborted.")
+
+        self.get_gui_thread_info()
+        if self.gui_thread_info.flags & (win32con.GUI_SYSTEMMENUMODE | win32con.GUI_INMENUMODE | win32con.GUI_POPUPMENUMODE):
+            raise RuntimeError("Menu active. Text insertion aborted.")
+        #i This technique only works for traditional Win32 menus incl. a window's system menu. The universal way would be to check whether `talon.windows.ax.get_focused_element().control_type` is `"MenuBar"` or `"MenuItem"`. But unfortunately, this API is very slow and would introduce a delay of up to about 83 ms according to the author's measurements before every flush.
+
+        if self.gui_thread_info.flags & win32con.GUI_INMOVESIZE:
+            raise RuntimeError("Window is being moved or resized. Text insertion aborted.")
+
+        if (
+            win32api.GetAsyncKeyState(win32con.VK_CONTROL) < 0
+            or win32api.GetAsyncKeyState(win32con.VK_SHIFT) < 0
+            or win32api.GetAsyncKeyState(win32con.VK_MENU) < 0  # Alt.
+            or win32api.GetAsyncKeyState(win32con.VK_LWIN) < 0
+            or win32api.GetAsyncKeyState(win32con.VK_RWIN) < 0
+        ):
+            raise RuntimeError("Modifier key held down. Text insertion aborted.")
+
+        # Send queued events.
+        num_events_sent = user32.SendInput(
+            self.num_events, self.events, ctypes.sizeof(INPUT)
+        )
+        if num_events_sent == 0:
+            raise ctypes.WinError(ctypes.get_last_error())
+        if num_events_sent != self.num_events:
+            raise RuntimeError("Failed to send all keyboard input requests.")
+
+        # Reset event queue with regard to next flush.
+        self.num_events = 0
+
+    def wait_for_stable_caret(self):
+        self.get_gui_thread_info()
+
+        if not (self.gui_thread_info.flags & win32con.GUI_CARETBLINKING):
+            # Change insertion mode. Previous mass event enqueuing may cause problems that may be unavoidable at this point.
+            self.must_wait_for_stable_caret = False
+            return
+
+        # Try to ensure window reacts quickly enough. (It may not on very high CPU load, e.g.)
+        UNREACTIVE_TIMEOUT_MS = 200
+
+        hwnd = self.gui_thread_info.hwndFocus or self.gui_thread_info.hwndActive
+        if not hwnd:
+            raise RuntimeError("Couldn't determine window.")
+
+        try:
+            win32gui.SendMessageTimeout(
+                hwnd,
+                win32con.WM_NULL,
+                0,
+                0,
+                win32con.SMTO_BLOCK | SMTO_ERRORONEXIT,
+                UNREACTIVE_TIMEOUT_MS,
+            )
+        except pywintypes.error as e:
+            if e.winerror == winerror.ERROR_TIMEOUT:
+                raise RuntimeError("Text insertion window was to slow to react.")
             else:
-                has_e0_extended_scan_code = False
-                scancode_or_code_unit = code_unit
+                raise e
 
-            for is_down_event in [True, False]:
-                if not is_down_event and (hold_keys_unconditionally or i < first_fast_code_unit_index or is_vk_event):
-                    flush()
-                    actions.sleep(key_hold_duration)
+        # Wait for caret.
+        num_empty_rects = 0
 
-                event = events[num_events_to_send]
+        last_rect = wintypes.RECT()
+        last_rect_fields = memoryview(last_rect).cast("B").cast("l")
 
-                event.type = win32con.INPUT_KEYBOARD
-                event.ki.wVk = vk
-                event.ki.wScan = scancode_or_code_unit
+        last_move_time = time.perf_counter()
 
-                flags = 0
-                if has_e0_extended_scan_code:
-                    flags |= win32con.KEYEVENTF_EXTENDEDKEY
-                if not is_vk_event:
-                    flags |= win32con.KEYEVENTF_UNICODE
-                if not is_down_event:
-                    flags |= win32con.KEYEVENTF_KEYUP
-                event.ki.dwFlags = flags
+        while True:
+            self.get_gui_thread_info()
+            rect = self.gui_thread_info.rcCaret
+            rect_fields = memoryview(rect).cast("B").cast("l")
+            #i The `GetGUIThreadInfo()` docs' remarks talk about strange encoding of special values in `rcCaret`. But since we just wait for the values to stabilize, we assume that this doesn't matter.
 
-                event.ki.time = 0
-                event.ki.dwExtraInfo = 0
+            if last_rect is None:
+                # Fetch first rect to get going.
+                pass
+            elif not any(rect_fields):
+                # Tolerate only a couple of empty rects that sporadically may be returned.
+                num_empty_rects += 1
+                if num_empty_rects >= 5:
+                    # Give up and change insertion mode.
+                    self.must_wait_for_stable_caret = False
+                    break
+            else:
+                now = time.perf_counter()
+                if rect_fields != last_rect_fields:
+                    # Reset.
+                    last_move_time = now
+                elif now - last_move_time >= self.stable_caret_duration:
+                    # Assume caret as stable.
+                    break
 
-                num_events_to_send += 1
+                if now - self.start_time >= INSERTION_TIMEOUT:
+                    raise RuntimeError("Text insertion took too long while waiting for caret to stop moving.")
 
-        flush()
+            actions.sleep(0.001)  # Throttle.
+            last_rect_fields[:] = rect_fields
+
+    def get_gui_thread_info(self):
+        success = user32.GetGUIThreadInfo(0, ctypes.byref(self.gui_thread_info))
+        if not success:
+            raise ctypes.WinError(ctypes.get_last_error())
+
+
+def _is_well_formed_utf16(code_units):
+    had_high_surrogate = False
+    for code_unit in code_units:
+        is_low_surrogate = code_unit >= 0xDC00 and code_unit <= 0xDFFF
+        if (
+            (not had_high_surrogate and is_low_surrogate)
+            or (had_high_surrogate and not is_low_surrogate)
+        ):
+            return False
+
+        had_high_surrogate = code_unit >= 0xD800 and code_unit <= 0xDBFF
+
+    return not had_high_surrogate

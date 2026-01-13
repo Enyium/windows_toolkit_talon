@@ -4,6 +4,7 @@ from ctypes import wintypes
 user32 = ctypes.WinDLL("user32", use_last_error=True)
 
 MAPVK_VK_TO_VSC_EX = 4
+SMTO_ERRORONEXIT = 0x0020
 
 ULONG_PTR = ctypes.c_size_t
 
