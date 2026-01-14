@@ -50,10 +50,10 @@ class MainActions:
 
         Characters are sent as themselves, and not as their respective key presses, which are keyboard-layout-dependent. This also comes with independence from the caps lock state. The only real key events simulated are for these keys:
 
-        - Backspace (`\b`, `\N{BS}`, `\N{BACKSPACE}`)
-        - Tab (`\t`, `\N{TAB}`)
-        - Enter (`\n`, `\N{NEW LINE}`)
-        - Esc (`\x1b`, `\N{ESC}`, `\N{ESCAPE}`; can be used before Tab or Enter to prevent confirming a suggestion)
+        - Tab (`\t`, `\N{TAB}`) - As with Talon's `insert()`, you must be careful not to accidentally accept editor suggestions. For most code use cases, only ever inserting `\t` at the start of a line or after other whitespace should suffice. If you work with TSV (tab-separated values) or something like that, you may need to turn off automatically appearing suggestion overlays completely.
+        - Enter (`\n`, `\N{NEW LINE}`) - As for Talon's `insert()`, you should turn off accepting suggestions with Enter altogether in every app, because characters triggering these overlays at the end of lines are basically unavoidable. See also Smart Input repository's readme.
+        - Esc (`\x1b`, `\N{ESC}`, `\N{ESCAPE}`) - Can dismiss a suggestion overlay to prevent confirming it, but race conditions may cause problems in certain apps. In general, success also depends too much on app settings and IDE state (find box incl. its highlights, etc.).
+        - Backspace (`\b`, `\N{BS}`, `\N{BACKSPACE}`) - Finalizing the current word with a space character and deleting it again can dismiss a suggestion overlay, but race conditions may cause problems in certain apps.
 
         Talon's setting `key_hold` still applies for those keys. Additionally, you can use the settings `user.char_pause_ms`, `user.stable_caret_ms_until_idle`, and `user.abort_insert_merely_on_app_change`.
         """
@@ -124,7 +124,7 @@ class InsertSession:
 
             for up in [False, True]:
                 if not up:
-                    #TODO: WITH SUITABLE TEST APP: With regard to suggestion windows, it could be necessary to also wait for caret stabilization before `\N{esc}`, `\t` and `\n` (VS Code confirms with Tab, Notepad++ also with Enter). But a test app would be needed that has suggestion windows, reports its caret, and benefits from caret stabilization. Depending on the settings, these additional pauses could undesirably add to `key_hold` pauses.
+                    #TODO: WITH SUITABLE TEST APP: With regard to suggestion windows, it could be necessary to also wait for caret stabilization before `\N{esc}`, `\t` and `\n` (suggestions are confirmed with Tab and/or Enter, depending on the app and its settings). But a test app would be needed that has suggestion windows, reports its caret, and benefits from caret stabilization. Depending on the settings, these additional pauses could undesirably add to `key_hold` pauses.
                     if self.must_wait_for_stable_caret and is_surrogate and not had_surrogate:
                         self.flush()
                         self.wait_for_stable_caret()
