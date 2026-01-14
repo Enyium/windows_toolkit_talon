@@ -30,12 +30,13 @@ mod.setting(
     default=0.0,
     desc="Milliseconds the caret (text input cursor) coordinates must not change until the target window is recognized as ready to receive further input. Not every app reports its carets in a performantly queryable manner. If it doesn't or stops reporting them mid-insertion, `user.char_pause_ms` is used for the rest of the insertion; but this may come too late for certain text. A setting value of 0 expressly turns the feature off.",
 )
-mod.setting(
-    "abort_insert_merely_on_app_change",
-    type=bool,
-    default=False,
-    desc="Whether `insert()` should only abort when the active app is changed. Otherwise, it will abort when the active window is changed. This is useful when a suggestion window would otherwise cause abortion.",
-)
+# mod.setting(
+#     "abort_insert_merely_on_app_change",
+#     type=bool,
+#     default=False,
+#     desc="Whether `insert()` should only abort when the active app is changed. Otherwise, it will abort when the active window is changed. This is useful when a suggestion window would otherwise cause abortion.",
+# )
+#i Setting `user.abort_insert_merely_on_app_change` unavailable for now. More information is needed what window activation is actually happening in the rare case that input is aborted by it (experienced in VS Code, but its suggestion overlays aren't Win32 windows, let alone top-level windows).
 
 ctx = Context()
 
@@ -55,8 +56,9 @@ class MainActions:
         - Esc (`\x1b`, `\N{ESC}`, `\N{ESCAPE}`) - Can dismiss a suggestion overlay to prevent confirming it, but race conditions may cause problems in certain apps. In general, success also depends too much on app settings and IDE state (find box incl. its highlights, etc.).
         - Backspace (`\b`, `\N{BS}`, `\N{BACKSPACE}`) - Finalizing the current word with a space character and deleting it again can dismiss a suggestion overlay, but race conditions may cause problems in certain apps.
 
-        Talon's setting `key_hold` still applies for those keys. Additionally, you can use the settings `user.char_pause_ms`, `user.stable_caret_ms_until_idle`, and `user.abort_insert_merely_on_app_change`.
+        Talon's setting `key_hold` still applies for those keys. Additionally, you can use the settings `user.char_pause_ms`, and `user.stable_caret_ms_until_idle`.
         """
+        #, and `user.abort_insert_merely_on_app_change`
 
         session = InsertSession()
         session.run(text)
@@ -78,7 +80,7 @@ class InsertSession:
         self.char_pause_duration = settings.get("user.char_pause_ms") / 1000
         self.stable_caret_duration = settings.get("user.stable_caret_ms_until_idle") / 1000
         self.must_wait_for_stable_caret = self.stable_caret_duration > 0
-        self.abort_on_window_xor_app_change = not settings.get("user.abort_insert_merely_on_app_change")
+        self.abort_on_window_xor_app_change = True #not settings.get("user.abort_insert_merely_on_app_change")
         #i `key_wait` only applies when modifiers are involved, which isn't the case here.
 
         self.events = None
@@ -202,11 +204,13 @@ class InsertSession:
 
         # Check for various obstacles.
         if self.abort_on_window_xor_app_change:
-            if ui.active_window().id != self.insertion_hwnd:
-                raise RuntimeError("Active window changed during text insertion. Insertion aborted.")
+            active_window = ui.active_window()
+            if active_window.id != self.insertion_hwnd:
+                raise RuntimeError(f"Active window changed during text insertion. Insertion aborted. Displacing window and app: `{active_window}` (HWND: {hex(active_window.id)}).")
         else:
-            if ui.active_app().pid != self.insertion_pid:
-                raise RuntimeError("Active app changed during text insertion. Insertion aborted.")
+            active_window = ui.active_window()
+            if active_window.app.pid != self.insertion_pid:
+                raise RuntimeError(f"Active app changed during text insertion. Insertion aborted. Displacing window and app: `{active_window}` (HWND: {hex(active_window.id)}).")
 
         self.get_gui_thread_info()
         if self.gui_thread_info.flags & (win32con.GUI_SYSTEMMENUMODE | win32con.GUI_INMENUMODE | win32con.GUI_POPUPMENUMODE):
