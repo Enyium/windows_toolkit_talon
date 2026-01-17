@@ -1,6 +1,6 @@
 import ctypes
 import re
-from typing import TYPE_CHECKING
+from typing import Optional, TYPE_CHECKING
 
 from talon import Module, app, ui
 from talon.ui import Window
@@ -32,14 +32,14 @@ _winui_limited_class_regex = re.compile(r"^(?:Windows|Microsoft)\.UI\.")
 
 _gtk_dll_regex = re.compile(r"(?i)^libgtk-[\d.-]+\.dll$")
 
-_ui_framework = "unknown"
+_ui_framework = None
 
 def _script_main():
     ui.register("win_focus", _on_win_focus)
 
 @_mod.scope
 def _ui_framework_scope():
-    return {"ui_framework": _ui_framework}
+    return {"ui_framework": _ui_framework or "unknown"}
 
 def _on_win_focus(window):
     global _ui_framework
@@ -74,7 +74,7 @@ def _on_win_focus_after_detection():
         win32gui.SendMessage(hwnd, win32con.WM_KEYDOWN, vk, shared_lparam)
         win32gui.SendMessage(hwnd, win32con.WM_KEYUP, vk, shared_lparam | (1 << 30) | (1 << 31))
 
-def _detect_ui_framework(window: Window) -> str:
+def _detect_ui_framework(window: Window) -> Optional[str]:
     """Detects the specified top-level window's UI framework, specifically with regard to event loop matters and automating the window.
 
     Subparts of a window may still be handled by other frameworks, which this function doesn't cover. E.g., data display controls in the Windows 11 Task Manager or the file display in the OS's open- and save-dialogs are implemented by DirectUI, and SWT uses Win32 controls.
@@ -108,7 +108,7 @@ def _detect_ui_framework(window: Window) -> str:
                 except pywintypes.error as e:
                     if e.winerror != winerror.ERROR_INVALID_WINDOW_HANDLE:
                         print("WARNING: Exception while trying to get owner window during UI framework detection:", e)
-                    return "unknown"
+                    return None
             case "AutoHotkeyGUI":
                 return "AutoHotkey"
                 #i Apps: Window Spy for AHKv2.
@@ -187,7 +187,7 @@ def _detect_ui_framework(window: Window) -> str:
             framework_id = element.framework_id
         except Exception as e:
             print("WARNING: UI Automation API error during UI framework detection:", e)
-            return "unknown"
+            return None
 
         #i - `"Win32"` as the framework ID is often only a placeholder, because no better value is provided.
         #i - It may be that a framework ID other than `"Win32"` is only provided on the child level. (This is, e.g., the case with VS Code.) But care must be taken not to confuse the framework ID of a control-level child (not covering the whole window surface) with the entire window's framework ID (see also other comment talking about DirectUI).
@@ -216,7 +216,7 @@ def _detect_ui_framework(window: Window) -> str:
         except pywintypes.error as e:
             if e.winerror != winerror.ERROR_INVALID_WINDOW_HANDLE:
                 print("WARNING: Exception while walking through child windows for UI framework detection:", e)
-            return "unknown"
+            return None
             
     # Check DLL filenames.
     if is_gdk:
@@ -251,9 +251,9 @@ def _detect_ui_framework(window: Window) -> str:
                 process_handle.Close()
         except pywintypes.error as e:
             print(f"WARNING: Exception while trying to retrieve loaded modules of process {window.app.pid}:", e)
-            return "unknown"
+            return None
 
     #
-    return "unknown"
+    return None
 
 _script_main()
