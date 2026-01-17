@@ -34,9 +34,45 @@ _gtk_dll_regex = re.compile(r"(?i)^libgtk-[\d.-]+\.dll$")
 
 _ui_framework = "unknown"
 
+def _script_main():
+    ui.register("win_focus", _on_win_focus)
+
 @_mod.scope
 def _ui_framework_scope():
     return {"ui_framework": _ui_framework}
+
+def _on_win_focus(window):
+    global _ui_framework
+    _ui_framework = _detect_ui_framework(window)
+    _on_win_focus_after_detection()
+    _ui_framework_scope.update()
+
+def _on_win_focus_after_detection():
+    global _ui_framework
+
+    if _ui_framework == "Qt":
+        #i When a Qt window is activated, its caret may first not be reported by `GetGUIThreadInfo()` anymore, which would be very useful for the `insert()` override. As it turns out, just briefly pressing the Shift key makes the caret be reported again. When trying to automate this, an attempt to send Shift via `SendInput()` didn't work. With `SendMessage()`, it worked. But sending `VK_NONAME` is even more innocuous and also works. (Tested in output pane of gImageReader v3.4.3.)
+
+        gui_thread_info = GUITHREADINFO(cbSize=ctypes.sizeof(GUITHREADINFO))
+        success = user32.GetGUIThreadInfo(0, ctypes.byref(gui_thread_info))
+        if not success:
+            raise ctypes.WinError(ctypes.get_last_error())
+
+        hwnd = gui_thread_info.hwndFocus or gui_thread_info.hwndActive
+        if not hwnd:
+            raise RuntimeError("Couldn't determine window.")
+
+        vk = win32con.VK_NONAME
+        scancode = win32api.MapVirtualKey(vk, MAPVK_VK_TO_VSC_EX)
+        is_extended_scancode = bool(scancode & 0xFF00)
+
+        shared_lparam = (
+            1  # Repeat count.
+            | ((scancode & 0xFF) << 16)
+            | (int(is_extended_scancode) << 24)
+        )
+        win32gui.SendMessage(hwnd, win32con.WM_KEYDOWN, vk, shared_lparam)
+        win32gui.SendMessage(hwnd, win32con.WM_KEYUP, vk, shared_lparam | (1 << 30) | (1 << 31))
 
 def _detect_ui_framework(window: Window) -> str:
     """Detects the specified top-level window's UI framework, specifically with regard to event loop matters and automating the window.
@@ -220,37 +256,4 @@ def _detect_ui_framework(window: Window) -> str:
     #
     return "unknown"
 
-def _on_win_focus_after_detection():
-    global _ui_framework
-
-    if _ui_framework == "Qt":
-        #i When a Qt window is activated, its caret may first not be reported by `GetGUIThreadInfo()` anymore, which would be very useful for the `insert()` override. As it turns out, just briefly pressing the Shift key makes the caret be reported again. When trying to automate this, an attempt to send Shift via `SendInput()` didn't work. With `SendMessage()`, it worked. But sending `VK_NONAME` is even more innocuous and also works. (Tested in output pane of gImageReader v3.4.3.)
-
-        gui_thread_info = GUITHREADINFO(cbSize=ctypes.sizeof(GUITHREADINFO))
-        success = user32.GetGUIThreadInfo(0, ctypes.byref(gui_thread_info))
-        if not success:
-            raise ctypes.WinError(ctypes.get_last_error())
-
-        hwnd = gui_thread_info.hwndFocus or gui_thread_info.hwndActive
-        if not hwnd:
-            raise RuntimeError("Couldn't determine window.")
-
-        vk = win32con.VK_NONAME
-        scancode = win32api.MapVirtualKey(vk, MAPVK_VK_TO_VSC_EX)
-        is_extended_scancode = bool(scancode & 0xFF00)
-
-        shared_lparam = (
-            1  # Repeat count.
-            | ((scancode & 0xFF) << 16)
-            | (int(is_extended_scancode) << 24)
-        )
-        win32gui.SendMessage(hwnd, win32con.WM_KEYDOWN, vk, shared_lparam)
-        win32gui.SendMessage(hwnd, win32con.WM_KEYUP, vk, shared_lparam | (1 << 30) | (1 << 31))
-
-def _on_win_focus(window):
-    global _ui_framework
-    _ui_framework = _detect_ui_framework(window)
-    _on_win_focus_after_detection()
-    _ui_framework_scope.update()
-
-ui.register("win_focus", _on_win_focus)
+_script_main()
