@@ -1,8 +1,10 @@
 import ctypes
 from ctypes import wintypes
 
+kernel32 = ctypes.WinDLL("kernel32", use_last_error=True)
 user32 = ctypes.WinDLL("user32", use_last_error=True)
 
+LIST_MODULES_ALL = 0x03
 MAPVK_VK_TO_VSC_EX = 4
 SMTO_ERRORONEXIT = 0x0020
 
@@ -64,6 +66,8 @@ class INPUT(ctypes.Structure):
     _fields_ = [("type", wintypes.DWORD), ("dummyunionname", _DUMMYUNIONNAME)]
 
 
+kernel32.K32GetModuleBaseNameW.argtypes = [wintypes.HANDLE, wintypes.HMODULE, wintypes.LPWSTR, wintypes.DWORD]
+kernel32.K32GetModuleBaseNameW.restype = wintypes.DWORD
 user32.GetGUIThreadInfo.argtypes = [wintypes.DWORD, ctypes.POINTER(GUITHREADINFO)]
 user32.GetGUIThreadInfo.restype = wintypes.BOOL
 user32.SendInput.argtypes = [wintypes.UINT, ctypes.POINTER(INPUT), ctypes.c_int]
