@@ -269,7 +269,7 @@ class _InsertSession:
             if e.winerror == winerror.ERROR_TIMEOUT:
                 raise RuntimeError("Text insertion window was to slow to react.")
             else:
-                raise e
+                raise
 
         # Wait for caret.
         num_empty_rects = 0
