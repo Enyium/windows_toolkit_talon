@@ -6,7 +6,7 @@ The file also prepares some frameworks' windows for automation in an indiscernib
 
 from collections import deque
 import ctypes
-from enum import Enum, auto
+from enum import Enum, IntEnum, auto
 import re
 import textwrap
 import time
@@ -31,6 +31,105 @@ else:
     raise NotImplementedError("Unsupported OS.")
 
 _mod = Module()
+
+
+class UIFramework(IntEnum):
+    # Special variants.
+    PENDING = "pending"
+    """The framework couldn't be detected right away on window activation, so a number of retries are undertaken until a timeout occurs."""
+
+    ERROR = "error"
+    """The detection code produced an exception that was logged in Talon's log. Allows for slow-input fallbacks."""
+
+    UNKNOWN = "unknown"
+    """No specific framework could be detected. Probably something like bare Win32, or a custom-drawing framework that doesn't leave any hints about it."""
+
+    # Concrete UI frameworks.
+    ATL = "ATL"
+    """- Active Template Library (C++)
+    - Apps: Autoruns"""
+
+    AUTO_HOTKEY = "AutoHotkey"
+    """Apps: Window Spy for AHKv2"""
+
+    AWT_SWING = "AWT/Swing"
+    """- AWT (Abstract Window Toolkit), typically in combination with Swing (Java)
+    - Apps: Android Studio, Swing App Example, ImageJ, SINE Isochronic Entrainer"""
+
+    CHROME = "Chrome"
+    """- Also reported as such by UI Automation API
+    - Apps: Chrome, Chromium derivates, Electron apps"""
+
+    CLASSIC_VISUAL_BASIC = "classic Visual Basic"
+    """Apps: [CharProbe](https://web.archive.org/web/20130312122416/http://www.dextronet.com/charprobe), [Color Selector](https://colorselector.sourceforge.net)"""
+
+    FLUTTER = "Flutter"
+
+    GECKO = "Gecko"
+    """- Also reported as such by UI Automation API
+    - Apps: Firefox, Firefox derivates, Thunderbird, Zotero"""
+
+    GTK = "GTK"
+    """- Originally "GIMP Toolkit"
+    - Apps: Inkscape, Qalculate, Czkawka"""
+
+    JAVA_FX = "JavaFX"
+    """Apps: AsciidocFX, PDFsam Basic"""
+
+    MFC = "MFC"
+    """- Microsoft Foundation Classes (C++)
+    - Apps:
+      - NVIDIA Control Panel, O&O RegEditor, PDFill PDF Tools
+      - MPC-HC"""
+
+    QT = "Qt"
+    """Apps: Equalizer APO, SQLiteStudio, XnConvert"""
+
+    SWT = "SWT"
+    """- Standard Widget Toolkit (Java)
+    - Apps: Eclipse IDE"""
+
+    VISUAL_CLASS_LIBRARY = "Visual Class Library"
+    """- (C++)
+    - Not to be confused with "Visual Component Library"
+    - Apps: LibreOffice, Apache OpenOffice"""
+
+    VISUAL_COMPONENT_LIBRARY = "Visual Component Library"
+    """- (mainly Delphi)
+    - Not to be confused with "Visual Class Library"
+    - Apps: Balabolka, HxD, [Billy](https://github.com/zQueal/Billy), HDDScan"""
+
+    WIN_FORMS = "WinForms"
+    """- Windows Forms (.NET)
+    - Apps: Shutdown Timer Classic, AS SSD Benchmark"""
+
+    WIN_UI = "WinUI"
+    """Apps:
+    - Microsoft PowerToys
+    - Windows taskbar's start and search flyouts
+    - Microsoft apps shipped with Windows, either hosted by `ApplicationFrameHost.exe` (Clock, Feedback Hub, Media Player) or not (Notepad, Paint)"""
+
+    WPF = "WPF"
+    """- Windows Presentation Foundation (.NET)
+    - Apps: Visual Studio Installer, Visual Studio, Accessibility Insights for Windows, ILSpy"""
+
+    WX_WIDGETS = "wxWidgets"
+    """Apps: Tenacity, HTerm"""
+
+    #
+    def __new__(cls, string: str):
+        value = getattr(cls, "_next_id", 1)
+        #i ID 0 must be avoided, because it overlaps with the meaning of a non-existent window property (see WinAPI's `GetPropW()`).
+        cls._next_id = value + 1
+
+        obj = int.__new__(cls, value)
+        obj._value_ = value
+        obj._string = string
+        return obj
+
+    def __str__(self) -> str:
+        return self._string
+
 
 #. Win32 class name regexes.
 _mfc_class_regex = re.compile(r"^Afx[:A-Z]")
@@ -67,7 +166,7 @@ def _retry_if_not_timed_out(window: Window):
         if time.perf_counter() - _retry_start >= TIMEOUT:
             _retry_job = None
 
-            # Cause special error value for framework.
+            # Cause special error value as framework up in the call stack.
             raise RuntimeError("Timeout reached while trying to recognize UI framework.")
     else:  # Just starting out.
         _retry_start = time.perf_counter()
@@ -103,16 +202,15 @@ def _update_scope(toplevel_window: Window):
             )
         )
 
-        _framework = "error"
-        #i This special value allows for slow input fallbacks.
+        _framework = UIFramework.ERROR
 
     _ui_framework_scope.update()
 
 @_mod.scope
 def _ui_framework_scope():
-    return {
-        "ui_framework": _framework or ("pending" if _retry_job else "unknown"),
-    }
+    global _framework, _retry_job
+    definite_framework = _framework or (UIFramework.PENDING if _retry_job else UIFramework.UNKNOWN)
+    return {"ui_framework": str(definite_framework)}
 
 
 class _Detector:
@@ -129,16 +227,16 @@ class _Detector:
     #i - System Informer (<https://systeminformer.sourceforge.io/>)
     #i - Detect It Easy (<https://horsicq.github.io/#detect-it-easydie>)
 
-    def __call__(self, toplevel_window: Window) -> Optional[str]:
+    def __call__(self, toplevel_window: Window) -> Optional[UIFramework]:
         return self._check_toplevel_window_and_its_cache(toplevel_window)
 
-    def _check_toplevel_window_and_its_cache(self, toplevel_window: Window) -> Optional[str]:
+    def _check_toplevel_window_and_its_cache(self, toplevel_window: Window) -> Optional[UIFramework]:
         """Reads the top-level window's UI framework from its window properties, or tries to recognize it."""
 
         #TODO: Read and write window properties to cache the assessment.
         return self._check_toplevel_window(toplevel_window)
 
-    def _check_toplevel_window(self, toplevel_window: Window) -> Optional[str]:
+    def _check_toplevel_window(self, toplevel_window: Window) -> Optional[UIFramework]:
         """Tries to recognize the top-level window's UI framework."""
 
         class ExtraSource(Enum):
@@ -171,74 +269,45 @@ class _Detector:
                     if framework:
                         return framework
             case "AutoHotkeyGUI":
-                return "AutoHotkey"
-                #i Apps: Window Spy for AHKv2.
+                return UIFramework.AUTO_HOTKEY
             case "SunAwtFrame" | "SunAwtDialog":
-                return "AWT/Swing"
-                #i Abstract Window Toolkit (Java).
-                #i Apps: Android Studio, Swing App Example, ImageJ, SINE Isochronic Entrainer.
+                return UIFramework.AWT_SWING
             case "ThunderRT6FormDC":
-                return "classic Visual Basic"
-                #i Apps: CharProbe (<https://web.archive.org/web/20130312122416/http://www.dextronet.com/charprobe>), Color Selector (<https://colorselector.sourceforge.net/>).
+                return UIFramework.CLASSIC_VISUAL_BASIC
             case "FLUTTER_RUNNER_WIN32_WINDOW":
-                return "Flutter"
-            case "gdkWindowToplevel" | "gdkSurfaceToplevel":
-                return self._check_module_filenames(toplevel_window.app.pid, {"GTK"})
-                #i GDK: GIMP Drawing Kit.
-                #i Apps: Inkscape, Qalculate, Czkawka.
+                return UIFramework.FLUTTER
+            case "gdkWindowToplevel" | "gdkSurfaceToplevel":  # GDK: GIMP Drawing Kit.
+                return self._check_module_filenames(toplevel_window.app.pid, {UIFramework.GTK})
             case "MozillaWindowClass":
-                return "Gecko"
-                #i Also reported as such by UI Automation API.
-                #i Apps: Firefox, Firefox derivates, Thunderbird, Zotero.
+                return UIFramework.GECKO
             case "SWT_Window0" | "SWT_WindowShadow0":
-                return "SWT"
-                #i Standard Widget Toolkit (Java).
-                #i Apps: Eclipse IDE.
+                return UIFramework.SWT
             case "SALFRAME" | "SALSUBFRAME":
-                return "Visual Class Library"
-                #i (C++) Not to be confused with "Visual Component Library".
-                #i Apps: LibreOffice, Apache OpenOffice.
+                return UIFramework.VISUAL_CLASS_LIBRARY
             case "WinUIDesktopWin32WindowClass":
-                return "WinUI"
-                #i Apps: Microsoft PowerToys.
+                return UIFramework.WIN_UI
             case "wxWindowNR":
-                return "wxWidgets"
-                #i Apps: Tenacity, HTerm.
+                return UIFramework.WX_WIDGETS
             case _:
                 if toplevel_class.startswith("ATL:"):
-                    return "ATL"
-                    #i Active Template Library (C++).
-                    #i Apps: Autoruns.
+                    return UIFramework.ATL
                 elif toplevel_class.startswith("Chrome_WidgetWin_"):
-                    return "Chrome"
-                    #i Also reported as such by UI Automation API.
-                    #i Apps: Chrome, Chromium derivates, Electron apps.
+                    return UIFramework.CHROME
                 elif toplevel_class.startswith("GlassWndClass-GlassWindowClass-"):
-                    return "JavaFX"
-                    #i Apps: AsciidocFX, PDFsam Basic.
+                    return UIFramework.JAVA_FX
                 elif _mfc_class_regex.search(toplevel_class):
-                    return "MFC"
-                    #i Microsoft Foundation Classes (C++).
-                    #i Apps: NVIDIA Control Panel, O&O RegEditor, PDFill PDF Tools.
+                    return UIFramework.MFC
                 elif _qt_class_regex.search(toplevel_class):
-                    return "Qt"
-                    #i Apps: Equalizer APO, SQLiteStudio, XnConvert.
+                    return UIFramework.QT
                 elif _visual_component_library_class_regex.search(toplevel_class):
-                    return "Visual Component Library"
-                    #i (mainly Delphi) Not to be confused with "Visual Class Library".
-                    #i Apps: Balabolka, HxD, Billy (<https://github.com/zQueal/Billy>), HDDScan.
+                    return UIFramework.VISUAL_COMPONENT_LIBRARY
                 elif _winforms_class_regex.search(toplevel_class):
-                    return "WinForms"
-                    #i Windows Forms (.NET).
-                    #i Apps: Shutdown Timer Classic, AS SSD Benchmark.
+                    return UIFramework.WIN_FORMS
                 elif _winui_limited_class_regex.search(toplevel_class):
-                    return "WinUI"
-                    #i Windows taskbar's start and search flyouts.
+                    return UIFramework.WIN_UI
                 elif toplevel_class.startswith("HwndWrapper["):
                     # Probably WPF.
                     favor_extra_source(ExtraSource.UIA_DATA)
-                    #i Windows Presentation Foundation (.NET).
-                    #i Apps: Visual Studio Installer, Visual Studio, Accessibility Insights for Windows, ILSpy.
 
         framework = None
         for source in extra_sources:
@@ -260,11 +329,11 @@ class _Detector:
 
         return None
 
-    def _check_child_window_tree(self, toplevel_window: Window, possible_frameworks: Optional[set[str]] = None) -> Optional[str]:
+    def _check_child_window_tree(self, toplevel_window: Window, possible_frameworks: Optional[set[UIFramework]] = None) -> Optional[UIFramework]:
         """Tries to recognize the top-level window's UI framework by its Win32 child window tree."""
 
-        wants_mfc = not possible_frameworks or "MFC" in possible_frameworks
-        wants_winui = not possible_frameworks or "WinUI" in possible_frameworks
+        wants_mfc = not possible_frameworks or UIFramework.MFC in possible_frameworks
+        wants_winui = not possible_frameworks or UIFramework.WIN_UI in possible_frameworks
 
         framework = None
 
@@ -281,17 +350,14 @@ class _Detector:
 
             #i The order of the checks can be relevant. See also other comment regarding DirectUI.
             if wants_mfc and _mfc_class_regex.search(child_class):
-                framework = "MFC"
-                #i Microsoft Foundation Classes (C++).
-                #i Apps: MPC-HC.
+                framework = UIFramework.MFC
                 return False
             if wants_winui and _winui_limited_class_regex.search(child_class):
                 # global _retry_job, _retry_start
                 # if _retry_job:
                 #     print(f"Duration until recognition: {(time.perf_counter() - _retry_start) * 1000:.0f} ms")
 
-                framework = "WinUI"
-                #i Microsoft apps shipped with Windows, either hosted by `ApplicationFrameHost.exe` (Clock, Feedback Hub, Media Player) or not (Notepad, Paint).
+                framework = UIFramework.WIN_UI
                 return False
 
             return True
@@ -299,10 +365,10 @@ class _Detector:
         win32gui.EnumChildWindows(toplevel_window.id, handle_child_window, None)
         return framework
 
-    def _check_module_filenames(self, pid, possible_frameworks: Optional[set[str]] = None) -> Optional[str]:
+    def _check_module_filenames(self, pid, possible_frameworks: Optional[set[UIFramework]] = None) -> Optional[UIFramework]:
         """Tries to recognize the process's UI framework by its module filenames (mostly DLLs)."""
 
-        wants_gtk = not possible_frameworks or "GTK" in possible_frameworks
+        wants_gtk = not possible_frameworks or UIFramework.GTK in possible_frameworks
 
         process_handle = win32api.OpenProcess(win32con.PROCESS_QUERY_INFORMATION | win32con.PROCESS_VM_READ, False, pid)
 
@@ -319,16 +385,14 @@ class _Detector:
                 filename = filename_buffer.value
 
                 if wants_gtk and _gtk_dll_regex.search(filename):
-                    return "GTK"
-                    #i Originally "GIMP ToolKit".
-                    #i Apps: See "GDK".
+                    return UIFramework.GTK
         finally:
             process_handle.Close()
 
-    def _check_uia_data(self, toplevel_window: Window, possible_frameworks: Optional[set[str]] = None) -> Optional[str]:
+    def _check_uia_data(self, toplevel_window: Window, possible_frameworks: Optional[set[UIFramework]] = None) -> Optional[UIFramework]:
         """Tries to recognize the top-level window's UI framework by its UI Automation data."""
 
-        wants_wpf = not possible_frameworks or "WPF" in possible_frameworks
+        wants_wpf = not possible_frameworks or UIFramework.WPF in possible_frameworks
 
         element = ax.get_element_from_handle(toplevel_window.id)
         framework_id = element.framework_id
@@ -339,7 +403,7 @@ class _Detector:
         #i - `element.automation_id` may also contain useful information.
 
         if wants_wpf and framework_id == "WPF":
-            return "WPF"
+            return UIFramework.WPF
 
         return None
 
@@ -356,8 +420,8 @@ def _get_owner_window(window: Window) -> Optional[Window]:
     windows = ui.windows(id=owner_hwnd)  # `NULL` simply yields nothing.
     return windows[0] if windows else None
 
-def _prepare_active_window(framework: Optional[str]):
-    if framework == "Qt":
+def _prepare_active_window(framework: Optional[UIFramework]):
+    if framework == UIFramework.QT:
         #i When a Qt window is activated, its caret may first not be reported by `GetGUIThreadInfo()` anymore, which would be very useful for the `insert()` override. As it turns out, just briefly pressing the Shift key makes the caret be reported again. When trying to automate this, an attempt to send Shift via `SendInput()` didn't work. With `SendMessage()`, it worked. But sending `VK_NONAME` is even more innocuous and also works. (Tested in output pane of gImageReader v3.4.3.)
 
         gui_thread_info = GUITHREADINFO(cbSize=ctypes.sizeof(GUITHREADINFO))

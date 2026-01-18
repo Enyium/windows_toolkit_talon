@@ -66,7 +66,7 @@ class _MainActions:
 
 
 class _InsertSession:
-    _VKS_OF_SELECT_ASCII_CODES = {
+    _VKS_BY_SELECT_ASCII_CODES = {
         # Keyboard-layout-invariant virtual-key codes that don't work with the `KEYEVENTF_UNICODE` flag.
         0x08: win32con.VK_BACK,
         0x09: win32con.VK_TAB,
@@ -115,7 +115,7 @@ class _InsertSession:
         had_surrogate = False
 
         for i, code_unit in enumerate(code_units):
-            vk = _InsertSession._VKS_OF_SELECT_ASCII_CODES.get(code_unit)  # Never 0.
+            vk = _InsertSession._VKS_BY_SELECT_ASCII_CODES.get(code_unit)  # Never 0.
             is_vk_event = bool(vk)
 
             is_printable = code_unit >= 0x20 and code_unit != 0x7F
