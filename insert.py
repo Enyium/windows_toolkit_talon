@@ -1,5 +1,4 @@
 import ctypes
-import struct
 import time
 from typing import TYPE_CHECKING
 
@@ -15,6 +14,8 @@ if app.platform == "windows" or TYPE_CHECKING:
     import winerror
 
     from .winapi import INPUT, GUITHREADINFO, MAPVK_VK_TO_VSC_EX, SMTO_ERRORONEXIT, user32
+else:
+    raise NotImplementedError("Unsupported OS.")
 
 _mod = Module()
 

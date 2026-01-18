@@ -15,7 +15,6 @@ from typing import Optional, TYPE_CHECKING
 
 from talon import Module, app, cron, ui
 from talon.ui import Window
-from talon.windows import ax
 
 if app.platform == "windows" or TYPE_CHECKING:
     import pywintypes
@@ -25,7 +24,11 @@ if app.platform == "windows" or TYPE_CHECKING:
     import win32process
     import winerror
 
+    from talon.windows import ax
+
     from .winapi import GUITHREADINFO, LIST_MODULES_ALL, MAPVK_VK_TO_VSC_EX, kernel32, user32
+else:
+    raise NotImplementedError("Unsupported OS.")
 
 _mod = Module()
 
@@ -45,7 +48,7 @@ _gtk_dll_regex = re.compile(r"(?i)^libgtk-[\d.-]+\.dll$")
 
 _framework = None  # Last assessment for communication with Talon scope.
 
-_retry_job = None
+_retry_job = None  # Not `None` means pending assessment.
 _retry_start = 0
 _retry_window = None
 
@@ -89,7 +92,7 @@ def _update_scope(toplevel_window: Window):
         _framework = _Detector()(toplevel_window)
         if _framework:
             _prepare_active_window(_framework)
-    except Exception as e:
+    except Exception:
         # Convert exception into mere output, so the Talon scope can't keep delivering a past framework, which could lead to erratic input behavior. (Actual Talon scope behavior not tested.)
         print(
             "ERROR: Exception during UI framework detection:\n"
