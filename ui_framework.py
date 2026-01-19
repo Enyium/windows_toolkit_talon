@@ -11,7 +11,7 @@ import re
 import textwrap
 import time
 import traceback
-from typing import Optional, TYPE_CHECKING
+from typing import Callable, Optional, TYPE_CHECKING
 
 from talon import Module, app, cron, ui
 from talon.ui import Window
@@ -30,19 +30,21 @@ if app.platform == "windows" or TYPE_CHECKING:
 else:
     raise NotImplementedError("Unsupported OS.")
 
+_script_load_time_ns = time.perf_counter_ns()
+
 _mod = Module()
 
 
 class UIFramework(IntEnum):
     # Special variants.
+    UNKNOWN = "unknown"
+    """No specific framework could be detected. Probably something like bare Win32, or a custom-drawing framework that doesn't leave any hints about it."""
+
     PENDING = "pending"
     """The framework couldn't be detected right away on window activation, so a number of retries are undertaken until a timeout occurs."""
 
     ERROR = "error"
     """The detection code produced an exception that was logged in Talon's log. Allows for slow-input fallbacks."""
-
-    UNKNOWN = "unknown"
-    """No specific framework could be detected. Probably something like bare Win32, or a custom-drawing framework that doesn't leave any hints about it."""
 
     # Concrete UI frameworks.
     ATL = "ATL"
@@ -71,7 +73,7 @@ class UIFramework(IntEnum):
 
     GTK = "GTK"
     """- Originally "GIMP Toolkit"
-    - Apps: Inkscape, Qalculate, Czkawka"""
+    - Apps: Inkscape, Qalculate (one variant), Czkawka"""
 
     JAVA_FX = "JavaFX"
     """Apps: AsciidocFX, PDFsam Basic"""
@@ -129,6 +131,10 @@ class UIFramework(IntEnum):
 
     def __str__(self) -> str:
         return self._string
+    
+    @property
+    def is_concrete(self) -> bool:
+        return self > UIFramework.ERROR
 
 
 #. Win32 class name regexes.
@@ -145,9 +151,10 @@ _winui_limited_class_regex = re.compile(r"^(?:Windows|Microsoft)\.UI\.")
 
 _gtk_dll_regex = re.compile(r"(?i)^libgtk-[\d.-]+\.dll$")
 
-_framework = None  # Last assessment for communication with Talon scope.
+_framework = UIFramework.PENDING
+"""Last assessment for communication with Talon scope."""
 
-_retry_job = None  # Not `None` means pending assessment.
+_retry_job = None
 _retry_start = 0
 _retry_window = None
 
@@ -158,15 +165,21 @@ def _on_win_focus(toplevel_window: Window):
     _abort_retry()
     _update_scope(toplevel_window)
 
-def _retry_if_not_timed_out(window: Window):
+def _retry(window: Window):
+    """Plans a retry of assessing the UI framework after a short duration. Raises an exception if a timeout was reached.
+
+    This function changes global state.
+    """
+
     global _retry_job, _retry_start, _retry_window
 
     if _retry_job:
         TIMEOUT = 2.0
         if time.perf_counter() - _retry_start >= TIMEOUT:
             _retry_job = None
+            _retry_window = None
 
-            # Cause special error value as framework up in the call stack.
+            # Cause `UIFramework.ERROR` up in the call stack.
             raise RuntimeError("Timeout reached while trying to recognize UI framework.")
     else:  # Just starting out.
         _retry_start = time.perf_counter()
@@ -187,30 +200,18 @@ def _on_retry_job():
 def _update_scope(toplevel_window: Window):
     global _retry_job, _framework
 
-    try:
-        _framework = _Detector()(toplevel_window)
-        if _framework:
-            _prepare_active_window(_framework)
-    except Exception:
-        # Convert exception into mere output, so the Talon scope can't keep delivering a past framework, which could lead to erratic input behavior. (Actual Talon scope behavior not tested.)
-        print(
-            "ERROR: Exception during UI framework detection:\n"
-            + textwrap.indent(
-                traceback.format_exc()
-                + f"Active top-level window (ID {hex(toplevel_window.id)}): {toplevel_window}",
-                "  ",
-            )
-        )
-
-        _framework = UIFramework.ERROR
+    _framework = _Detector()(toplevel_window)
+    #i Shouldn't raise exceptions (see implementation).
 
     _ui_framework_scope.update()
 
+    _prepare_active_window(_framework)
+    #i Last, because possible exception shouldn't prevent scope update.
+
 @_mod.scope
 def _ui_framework_scope():
-    global _framework, _retry_job
-    definite_framework = _framework or (UIFramework.PENDING if _retry_job else UIFramework.UNKNOWN)
-    return {"ui_framework": str(definite_framework)}
+    global _framework
+    return {"ui_framework": str(_framework)}
 
 
 class _Detector:
@@ -227,16 +228,60 @@ class _Detector:
     #i - System Informer (<https://systeminformer.sourceforge.io/>)
     #i - Detect It Easy (<https://horsicq.github.io/#detect-it-easydie>)
 
-    def __call__(self, toplevel_window: Window) -> Optional[UIFramework]:
-        return self._check_toplevel_window_and_its_cache(toplevel_window)
+    def __call__(self, toplevel_window: Window) -> UIFramework:
+        return self._check_toplevel_window_and_its_cache(toplevel_window, _retry)
 
-    def _check_toplevel_window_and_its_cache(self, toplevel_window: Window) -> Optional[UIFramework]:
+    def _check_toplevel_window_and_its_cache(self, toplevel_window: Window, retry_or_noop: Callable[[Window], None]) -> UIFramework:
         """Reads the top-level window's UI framework from its window properties, or tries to recognize it."""
 
-        #TODO: Read and write window properties to cache the assessment.
-        return self._check_toplevel_window(toplevel_window)
+        FRAMEWORK_INT_PROP_NAME = "Talon.SmartInput.UIFramework"
+        ASSESSMENT_TIME_NS_PROP_NAME = "Talon.SmartInput.UIFrameworkAssessmentTimeNS"
 
-    def _check_toplevel_window(self, toplevel_window: Window) -> Optional[UIFramework]:
+        cached_assessment_time_ns = user32.GetPropW(toplevel_window.id, ASSESSMENT_TIME_NS_PROP_NAME)
+        if cached_assessment_time_ns and cached_assessment_time_ns >= _script_load_time_ns:
+        #i Enum may have been changed before script reload.
+            try:
+                framework = UIFramework(user32.GetPropW(toplevel_window.id, FRAMEWORK_INT_PROP_NAME))
+                if framework != UIFramework.PENDING:
+                    return framework
+            except ValueError:
+                pass
+
+        try:
+            framework = self._check_toplevel_window(toplevel_window, retry_or_noop)
+
+            # Cache assessment inside window itself.
+            if framework != UIFramework.PENDING:
+                for (prop_name, value) in (
+                    (FRAMEWORK_INT_PROP_NAME, int(framework)),
+                    (ASSESSMENT_TIME_NS_PROP_NAME, time.perf_counter_ns()),  # Dependent on 64-bit process.
+                    #i Setting the UI framework first is important. If we'd set the assessment time first and then setting the UI framework failed, we would have presented the old UI framework value as valid in the current context.
+                ):
+                    success = user32.SetPropW(toplevel_window.id, prop_name, value)
+                    if not success:
+                        last_error = ctypes.get_last_error()
+                        if last_error == winerror.ERROR_INVALID_WINDOW_HANDLE:
+                            break
+                        else:
+                            raise ctypes.WinError(last_error)
+
+                #i Since we only save numeric values, final removal with `RemovePropW()` shouldn't be necessary.
+        except Exception:
+            # Convert exception into mere output, so the Talon scope can't keep delivering a past framework, which could lead to erratic input behavior. (Actual Talon scope behavior not tested.)
+            print(
+                "ERROR: Exception during UI framework detection:\n"
+                + textwrap.indent(
+                    traceback.format_exc()
+                    + f"Active top-level window (ID {hex(toplevel_window.id)}): {toplevel_window}",
+                    "  ",
+                )
+            )
+
+            framework = UIFramework.ERROR
+
+        return framework
+
+    def _check_toplevel_window(self, toplevel_window: Window, retry_or_noop: Callable[[Window], None]) -> UIFramework:
         """Tries to recognize the top-level window's UI framework."""
 
         class ExtraSource(Enum):
@@ -244,7 +289,6 @@ class _Detector:
             MODULE_FILENAMES = auto()
             UIA_DATA = auto()
 
-        toplevel_class = toplevel_window.cls  # Win32 class name.
         extra_sources = deque((ExtraSource.CHILD_WINDOW_TREE,))
 
         def remove_extra_source(source: ExtraSource):
@@ -259,14 +303,15 @@ class _Detector:
             remove_extra_source(source)
             extra_sources.appendleft(source)
 
+        toplevel_class = toplevel_window.cls  # Win32 class name.
         match toplevel_class:
             case "#32770":  # Dialog system class.
                 # Try again with owner window, if available.
                 owner_window = _get_owner_window(toplevel_window)
                 #TODO: This regularly detects default open- and save-dialogs incorrectly (e.g., in Balabolka). Maybe check child tree for hints - before owner detection on same PIDs, and after this `case` on different PIDs.
                 if owner_window and owner_window.app.pid == toplevel_window.app.pid:
-                    framework = self._check_toplevel_window_and_its_cache(owner_window)
-                    if framework:
+                    framework = self._check_toplevel_window_and_its_cache(owner_window, lambda _: None)
+                    if framework.is_concrete:
                         return framework
             case "AutoHotkeyGUI":
                 return UIFramework.AUTO_HOTKEY
@@ -309,7 +354,8 @@ class _Detector:
                     # Probably WPF.
                     favor_extra_source(ExtraSource.UIA_DATA)
 
-        framework = None
+        framework = UIFramework.UNKNOWN
+
         for source in extra_sources:
             match source:
                 case ExtraSource.CHILD_WINDOW_TREE:
@@ -319,23 +365,24 @@ class _Detector:
                 case ExtraSource.UIA_DATA:
                     framework = self._check_uia_data(toplevel_window)
 
-            if framework:
+            if framework != UIFramework.UNKNOWN:
                 return framework
 
         if toplevel_class == "ApplicationFrameWindow":
         #i Probably hosted WinUI app. (Process A has child windows of process B.)
-            # Try again for some duration until app hopefully loaded in a recognizable manner.
-            _retry_if_not_timed_out(toplevel_window)
+            # Try again until app hopefully loaded in a recognizable manner.
+            retry_or_noop(toplevel_window)
+            framework = UIFramework.PENDING
 
-        return None
+        return framework
 
-    def _check_child_window_tree(self, toplevel_window: Window, possible_frameworks: Optional[set[UIFramework]] = None) -> Optional[UIFramework]:
+    def _check_child_window_tree(self, toplevel_window: Window, possible_frameworks: Optional[set[UIFramework]] = None) -> UIFramework:
         """Tries to recognize the top-level window's UI framework by its Win32 child window tree."""
 
         wants_mfc = not possible_frameworks or UIFramework.MFC in possible_frameworks
         wants_winui = not possible_frameworks or UIFramework.WIN_UI in possible_frameworks
 
-        framework = None
+        framework = UIFramework.UNKNOWN
 
         def handle_child_window(hwnd, _):
             nonlocal framework
@@ -365,7 +412,7 @@ class _Detector:
         win32gui.EnumChildWindows(toplevel_window.id, handle_child_window, None)
         return framework
 
-    def _check_module_filenames(self, pid, possible_frameworks: Optional[set[UIFramework]] = None) -> Optional[UIFramework]:
+    def _check_module_filenames(self, pid, possible_frameworks: Optional[set[UIFramework]] = None) -> UIFramework:
         """Tries to recognize the process's UI framework by its module filenames (mostly DLLs)."""
 
         wants_gtk = not possible_frameworks or UIFramework.GTK in possible_frameworks
@@ -389,7 +436,9 @@ class _Detector:
         finally:
             process_handle.Close()
 
-    def _check_uia_data(self, toplevel_window: Window, possible_frameworks: Optional[set[UIFramework]] = None) -> Optional[UIFramework]:
+        return UIFramework.UNKNOWN
+
+    def _check_uia_data(self, toplevel_window: Window, possible_frameworks: Optional[set[UIFramework]] = None) -> UIFramework:
         """Tries to recognize the top-level window's UI framework by its UI Automation data."""
 
         wants_wpf = not possible_frameworks or UIFramework.WPF in possible_frameworks
@@ -405,7 +454,7 @@ class _Detector:
         if wants_wpf and framework_id == "WPF":
             return UIFramework.WPF
 
-        return None
+        return UIFramework.UNKNOWN
 
 
 def _get_owner_window(window: Window) -> Optional[Window]:
@@ -420,7 +469,7 @@ def _get_owner_window(window: Window) -> Optional[Window]:
     windows = ui.windows(id=owner_hwnd)  # `NULL` simply yields nothing.
     return windows[0] if windows else None
 
-def _prepare_active_window(framework: Optional[UIFramework]):
+def _prepare_active_window(framework: UIFramework):
     if framework == UIFramework.QT:
         #i When a Qt window is activated, its caret may first not be reported by `GetGUIThreadInfo()` anymore, which would be very useful for the `insert()` override. As it turns out, just briefly pressing the Shift key makes the caret be reported again. When trying to automate this, an attempt to send Shift via `SendInput()` didn't work. With `SendMessage()`, it worked. But sending `VK_NONAME` is even more innocuous and also works. (Tested in output pane of gImageReader v3.4.3.)
 
@@ -442,7 +491,8 @@ def _prepare_active_window(framework: Optional[UIFramework]):
             | ((scancode & 0xFF) << 16)
             | (int(is_extended_scancode) << 24)
         )
-        win32gui.SendMessage(hwnd, win32con.WM_KEYDOWN, vk, shared_lparam)
-        win32gui.SendMessage(hwnd, win32con.WM_KEYUP, vk, shared_lparam | (1 << 30) | (1 << 31))
+        win32gui.PostMessage(hwnd, win32con.WM_KEYDOWN, vk, shared_lparam)
+        win32gui.PostMessage(hwnd, win32con.WM_KEYUP, vk, shared_lparam | (1 << 30) | (1 << 31))
+        #i The asynchronous `PostMessage()` instead of the synchronous `SendMessage()` is used, because the calls may take a considerable amount of time (seconds) when an app was just started. Ensuring the window is fully prepared before insertion can even start is desirable, but this function runs inside the `win_focus` event handler, shouldn't delay other handlers, and text insertion while the app window isn't fully loaded yet is improbable.
 
 _script_main()
