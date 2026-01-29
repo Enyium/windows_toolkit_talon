@@ -6,7 +6,7 @@ The file also prepares some frameworks' windows for automation in an indiscernib
 
 from collections import deque
 import ctypes
-from enum import Enum, IntEnum, auto
+from enum import Enum, auto
 import re
 import textwrap
 import time
@@ -15,6 +15,8 @@ from typing import Callable, Optional, TYPE_CHECKING
 
 from talon import Module, app, cron, ui
 from talon.ui import Window
+
+from .lib.str_carrying_one_based_int_enum import StrCarryingOneBasedIntEnum
 
 if app.platform == "windows" or TYPE_CHECKING:
     import pywintypes
@@ -35,7 +37,7 @@ _script_load_time_ns = time.perf_counter_ns()
 _mod = Module()
 
 
-class UIFramework(IntEnum):
+class UIFramework(StrCarryingOneBasedIntEnum):
     # Special variants.
     UNKNOWN = "unknown"
     """No specific framework could be detected. Probably something like bare Win32, or a custom-drawing framework that doesn't leave any hints about it."""
@@ -119,19 +121,6 @@ class UIFramework(IntEnum):
     """Apps: Tenacity, HTerm"""
 
     #
-    def __new__(cls, string: str):
-        value = getattr(cls, "_next_id", 1)
-        #i ID 0 must be avoided, because it overlaps with the meaning of a non-existent window property (see WinAPI's `GetPropW()`).
-        cls._next_id = value + 1
-
-        obj = int.__new__(cls, value)
-        obj._value_ = value
-        obj._string = string
-        return obj
-
-    def __str__(self) -> str:
-        return self._string
-    
     @property
     def is_concrete(self) -> bool:
         return self > UIFramework.ERROR
