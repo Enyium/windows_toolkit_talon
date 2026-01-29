@@ -1,8 +1,8 @@
 import ctypes
 from ctypes import wintypes
 
-kernel32 = ctypes.WinDLL("kernel32", use_last_error=True)
-user32 = ctypes.WinDLL("user32", use_last_error=True)
+kernel32 = ctypes.WinDLL("kernel32.dll", use_last_error=True)
+user32 = ctypes.WinDLL("user32.dll", use_last_error=True)
 
 LIST_MODULES_ALL = 0x03
 MAPVK_VK_TO_VSC_EX = 4

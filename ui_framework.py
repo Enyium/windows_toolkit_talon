@@ -26,7 +26,7 @@ if app.platform == "windows" or TYPE_CHECKING:
 
     from talon.windows import ax
 
-    from .winapi import GUITHREADINFO, LIST_MODULES_ALL, MAPVK_VK_TO_VSC_EX, kernel32, user32
+    from .lib.winapi import GUITHREADINFO, LIST_MODULES_ALL, MAPVK_VK_TO_VSC_EX, kernel32, user32
 else:
     raise NotImplementedError("Unsupported OS.")
 

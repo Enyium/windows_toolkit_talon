@@ -13,7 +13,7 @@ if app.platform == "windows" or TYPE_CHECKING:
     import win32gui
     import winerror
 
-    from .winapi import INPUT, GUITHREADINFO, MAPVK_VK_TO_VSC_EX, SMTO_ERRORONEXIT, user32
+    from .lib.winapi import INPUT, GUITHREADINFO, MAPVK_VK_TO_VSC_EX, SMTO_ERRORONEXIT, user32
 else:
     raise NotImplementedError("Unsupported OS.")
 
