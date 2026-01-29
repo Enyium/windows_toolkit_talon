@@ -56,8 +56,8 @@ class UIFramework(StrCarryingOneBasedIntEnum):
     AUTO_HOTKEY = "AutoHotkey"
     """Apps: Window Spy for AHKv2"""
 
-    AWT_SWING = "AWT/Swing"
-    """- AWT (Abstract Window Toolkit), typically in combination with Swing (Java)
+    AWT = "AWT"
+    """- Abstract Window Toolkit, typically in combination with Swing (Java)
     - Apps: Android Studio, Swing App Example, ImageJ, SINE Isochronic Entrainer"""
 
     CHROME = "Chrome"
@@ -107,11 +107,16 @@ class UIFramework(StrCarryingOneBasedIntEnum):
     """- Windows Forms (.NET)
     - Apps: Shutdown Timer Classic, AS SSD Benchmark"""
 
-    WIN_UI = "WinUI"
+    WINRT_XAML = "WinRT XAML"
     """Apps:
-    - Microsoft PowerToys
-    - Windows taskbar's start and search flyouts
-    - Microsoft apps shipped with Windows, either hosted by `ApplicationFrameHost.exe` (Clock, Feedback Hub, Media Player) or not (Notepad, Paint)"""
+    - UWP XAML:
+      - Windows taskbar's start and search flyouts
+      - Microsoft apps shipped with Windows, hosted by `ApplicationFrameHost.exe`, like Clock, Feedback Hub, Media Player
+    - XAML Islands:
+      - Windows Alt+Tab task switcher
+    - WinUI 3:
+      - Microsoft PowerToys
+      - Microsoft apps shipped with Windows, not hosted by `ApplicationFrameHost.exe`, like Notepad, Paint"""
 
     WPF = "WPF"
     """- Windows Presentation Foundation (.NET)
@@ -126,7 +131,7 @@ class UIFramework(StrCarryingOneBasedIntEnum):
         return self > UIFramework.ERROR
 
 
-#. Win32 class name regexes.
+#. Win32 class names.
 _mfc_class_regex = re.compile(r"^Afx[:A-Z]")
 _qt_class_regex = re.compile(r"^(?:Qt\d+QWindowIcon|QWidget)$")
 _visual_component_library_class_regex = re.compile(r"""(?x)
@@ -136,7 +141,12 @@ _visual_component_library_class_regex = re.compile(r"""(?x)
     )$
 """)
 _winforms_class_regex = re.compile(r"^WindowsForms\d+\.")
-_winui_limited_class_regex = re.compile(r"^(?:Windows|Microsoft)\.UI\.")
+_WINRT_XAML_CHILD_CLASSES = frozenset({
+    "Windows.UI.Core.CoreWindow",
+    #i See also <https://learn.microsoft.com/en-us/uwp/api/windows.ui.core.corewindow>.
+    "Windows.UI.Composition.DesktopWindowContentBridge",
+    "Microsoft.UI.Content.DesktopChildSiteBridge",
+})
 
 _gtk_dll_regex = re.compile(r"(?i)^libgtk-[\d.-]+\.dll$")
 
@@ -260,7 +270,7 @@ class _Detector:
             print(
                 "ERROR: Exception during UI framework detection:\n"
                 + textwrap.indent(
-                    traceback.format_exc()
+                    traceback.format_exc()  # Ends with newline.
                     + f"Active top-level window (ID {hex(toplevel_window.id)}): {toplevel_window}",
                     "  ",
                 )
@@ -305,7 +315,7 @@ class _Detector:
             case "AutoHotkeyGUI":
                 return UIFramework.AUTO_HOTKEY
             case "SunAwtFrame" | "SunAwtDialog":
-                return UIFramework.AWT_SWING
+                return UIFramework.AWT
             case "ThunderRT6FormDC":
                 return UIFramework.CLASSIC_VISUAL_BASIC
             case "FLUTTER_RUNNER_WIN32_WINDOW":
@@ -318,8 +328,8 @@ class _Detector:
                 return UIFramework.SWT
             case "SALFRAME" | "SALSUBFRAME":
                 return UIFramework.VISUAL_CLASS_LIBRARY
-            case "WinUIDesktopWin32WindowClass":
-                return UIFramework.WIN_UI
+            case "Windows.UI.Core.CoreWindow" | "WinUIDesktopWin32WindowClass":
+                return UIFramework.WINRT_XAML
             case "wxWindowNR":
                 return UIFramework.WX_WIDGETS
             case _:
@@ -337,8 +347,6 @@ class _Detector:
                     return UIFramework.VISUAL_COMPONENT_LIBRARY
                 elif _winforms_class_regex.search(toplevel_class):
                     return UIFramework.WIN_FORMS
-                elif _winui_limited_class_regex.search(toplevel_class):
-                    return UIFramework.WIN_UI
                 elif toplevel_class.startswith("HwndWrapper["):
                     # Probably WPF.
                     favor_extra_source(ExtraSource.UIA_DATA)
@@ -358,7 +366,7 @@ class _Detector:
                 return framework
 
         if toplevel_class == "ApplicationFrameWindow":
-        #i Probably hosted WinUI app. (Process A has child windows of process B.)
+        #i Probably hosted UWP app. (Process A has child windows of process B.)
             # Try again until app hopefully loaded in a recognizable manner.
             retry_or_noop(toplevel_window)
             framework = UIFramework.PENDING
@@ -369,7 +377,7 @@ class _Detector:
         """Tries to recognize the top-level window's UI framework by its Win32 child window tree."""
 
         wants_mfc = not possible_frameworks or UIFramework.MFC in possible_frameworks
-        wants_winui = not possible_frameworks or UIFramework.WIN_UI in possible_frameworks
+        wants_winrt_xaml = not possible_frameworks or UIFramework.WINRT_XAML in possible_frameworks
 
         framework = UIFramework.UNKNOWN
 
@@ -388,12 +396,12 @@ class _Detector:
             if wants_mfc and _mfc_class_regex.search(child_class):
                 framework = UIFramework.MFC
                 return False
-            if wants_winui and _winui_limited_class_regex.search(child_class):
+            if wants_winrt_xaml and child_class in _WINRT_XAML_CHILD_CLASSES:
                 # global _retry_job, _retry_start
                 # if _retry_job:
                 #     print(f"Duration until recognition: {(time.perf_counter() - _retry_start) * 1000:.0f} ms")
 
-                framework = UIFramework.WIN_UI
+                framework = UIFramework.WINRT_XAML
                 return False
 
             return True
