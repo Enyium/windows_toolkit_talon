@@ -32,8 +32,10 @@ if app.platform == "windows" or TYPE_CHECKING:
 else:
     raise NotImplementedError("Unsupported OS.")
 
-_script_load_time_ns = time.perf_counter_ns()
+_MUST_CACHE_ASSESSMENT = True
+"""Can be turned off for debug purposes."""
 
+_script_load_time_ns = time.perf_counter_ns()
 _mod = Module()
 
 
@@ -49,6 +51,10 @@ class UIFramework(StrCarryingOneBasedIntEnum):
     """The detection code produced an exception that was logged in Talon's log. Allows for slow-input fallbacks."""
 
     # Concrete UI frameworks.
+    @property
+    def is_concrete(self) -> bool:
+        return self > UIFramework.ERROR
+
     ATL = "ATL"
     """- Active Template Library (C++)
     - Apps: Autoruns"""
@@ -124,11 +130,6 @@ class UIFramework(StrCarryingOneBasedIntEnum):
 
     WX_WIDGETS = "wxWidgets"
     """Apps: Tenacity, HTerm"""
-
-    #
-    @property
-    def is_concrete(self) -> bool:
-        return self > UIFramework.ERROR
 
 
 #. Win32 class names.
@@ -236,21 +237,24 @@ class _Detector:
         FRAMEWORK_INT_PROP_NAME = "Talon.SmartInput.UIFramework"
         ASSESSMENT_TIME_NS_PROP_NAME = "Talon.SmartInput.UIFrameworkAssessmentTimeNS"
 
-        cached_assessment_time_ns = user32.GetPropW(toplevel_window.id, ASSESSMENT_TIME_NS_PROP_NAME)
-        if cached_assessment_time_ns and cached_assessment_time_ns >= _script_load_time_ns:
-        #i Enum may have been changed before script reload.
-            try:
-                framework = UIFramework(user32.GetPropW(toplevel_window.id, FRAMEWORK_INT_PROP_NAME))
-                if framework != UIFramework.PENDING:
-                    return framework
-            except ValueError:
-                pass
+        # Read cached assessment, if available.
+        if _MUST_CACHE_ASSESSMENT:
+            cached_assessment_time_ns = user32.GetPropW(toplevel_window.id, ASSESSMENT_TIME_NS_PROP_NAME)
+            if cached_assessment_time_ns and cached_assessment_time_ns >= _script_load_time_ns:
+            #i Enum may have been changed before script reload.
+                try:
+                    framework = UIFramework(user32.GetPropW(toplevel_window.id, FRAMEWORK_INT_PROP_NAME))
+                    if framework != UIFramework.PENDING:
+                        return framework
+                except ValueError:
+                    pass
 
+        # Assess.
         try:
             framework = self._check_toplevel_window(toplevel_window, retry_or_noop)
 
             # Cache assessment inside window itself.
-            if framework != UIFramework.PENDING:
+            if _MUST_CACHE_ASSESSMENT and framework != UIFramework.PENDING:
                 for (prop_name, value) in (
                     (FRAMEWORK_INT_PROP_NAME, int(framework)),
                     (ASSESSMENT_TIME_NS_PROP_NAME, time.perf_counter_ns()),  # Dependent on 64-bit process.
@@ -397,7 +401,6 @@ class _Detector:
                 framework = UIFramework.MFC
                 return False
             if wants_winrt_xaml and child_class in _WINRT_XAML_CHILD_CLASSES:
-                # global _retry_job, _retry_start
                 # if _retry_job:
                 #     print(f"Duration until recognition: {(time.perf_counter() - _retry_start) * 1000:.0f} ms")
 
