@@ -380,8 +380,8 @@ class _Detector:
     def _check_child_window_tree(self, toplevel_window: Window, possible_frameworks: Optional[set[UIFramework]] = None) -> UIFramework:
         """Tries to recognize the top-level window's UI framework by its Win32 child window tree."""
 
-        wants_mfc = not possible_frameworks or UIFramework.MFC in possible_frameworks
-        wants_winrt_xaml = not possible_frameworks or UIFramework.WINRT_XAML in possible_frameworks
+        wants_mfc = possible_frameworks is None or UIFramework.MFC in possible_frameworks
+        wants_winrt_xaml = possible_frameworks is None or UIFramework.WINRT_XAML in possible_frameworks
 
         framework = UIFramework.UNKNOWN
 
@@ -415,7 +415,7 @@ class _Detector:
     def _check_module_filenames(self, pid, possible_frameworks: Optional[set[UIFramework]] = None) -> UIFramework:
         """Tries to recognize the process's UI framework by its module filenames (mostly DLLs)."""
 
-        wants_gtk = not possible_frameworks or UIFramework.GTK in possible_frameworks
+        wants_gtk = possible_frameworks is None or UIFramework.GTK in possible_frameworks
 
         process_handle = win32api.OpenProcess(win32con.PROCESS_QUERY_INFORMATION | win32con.PROCESS_VM_READ, False, pid)
 
@@ -441,7 +441,7 @@ class _Detector:
     def _check_uia_data(self, toplevel_window: Window, possible_frameworks: Optional[set[UIFramework]] = None) -> UIFramework:
         """Tries to recognize the top-level window's UI framework by its UI Automation data."""
 
-        wants_wpf = not possible_frameworks or UIFramework.WPF in possible_frameworks
+        wants_wpf = possible_frameworks is None or UIFramework.WPF in possible_frameworks
 
         element = ax.get_element_from_handle(toplevel_window.id)
         framework_id = element.framework_id
