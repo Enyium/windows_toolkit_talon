@@ -61,8 +61,7 @@ class _MainActions:
         """
         #, and `user.abort_insert_merely_on_app_change`
 
-        session = _InsertSession()
-        session.run(text)
+        _InsertSession()(text)
 
 
 class _InsertSession:
@@ -93,10 +92,10 @@ class _InsertSession:
 
         self._gui_thread_info = GUITHREADINFO(cbSize=ctypes.sizeof(GUITHREADINFO))
 
-    def run(self, text):
+    def __call__(self, text):
         # Text to UTF-16 code units.
         utf16le_bytes = text.encode("utf-16-le", errors="surrogatepass")
-        code_units = memoryview(utf16le_bytes).cast("@H")
+        code_units = memoryview(utf16le_bytes).cast("@H")  # Native-endian unsigned short.
         if not _is_well_formed_utf16(code_units):
             raise ValueError("Malformed UTF-16.")
 
