@@ -4,10 +4,11 @@ from ctypes import wintypes
 kernel32 = ctypes.WinDLL("kernel32.dll", use_last_error=True)
 user32 = ctypes.WinDLL("user32.dll", use_last_error=True)
 
-LIST_MODULES_ALL = 0x03
+GWLP_HINSTANCE = -6
 MAPVK_VK_TO_VSC_EX = 4
 SMTO_ERRORONEXIT = 0x0020
 
+LONG_PTR = ctypes.c_ssize_t
 ULONG_PTR = ctypes.c_size_t
 
 
@@ -72,6 +73,8 @@ user32.GetGUIThreadInfo.argtypes = [wintypes.DWORD, ctypes.POINTER(GUITHREADINFO
 user32.GetGUIThreadInfo.restype = wintypes.BOOL
 user32.GetPropW.argtypes = [wintypes.HWND, wintypes.LPCWSTR]
 user32.GetPropW.restype = wintypes.HANDLE
+user32.GetWindowLongPtrW.argtypes = [wintypes.HWND, ctypes.c_int]
+user32.GetWindowLongPtrW.restype = LONG_PTR
 user32.IsWindowVisible.argtypes = [wintypes.HWND]
 user32.IsWindowVisible.restype = wintypes.BOOL
 user32.SendInput.argtypes = [wintypes.UINT, ctypes.POINTER(INPUT), ctypes.c_int]

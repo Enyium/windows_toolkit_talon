@@ -4,7 +4,6 @@ This file makes the `user.ui_framework` Talon scope available that can be used f
 The file also prepares some frameworks' windows for automation in an indiscernible manner whenever they're activated.
 """
 
-from collections import deque
 import ctypes
 from enum import Enum, auto
 import re
@@ -28,7 +27,7 @@ if app.platform == "windows" or TYPE_CHECKING:
 
     from talon.windows import ax
 
-    from .lib.winapi import GUITHREADINFO, LIST_MODULES_ALL, MAPVK_VK_TO_VSC_EX, kernel32, user32
+    from .lib.winapi import GUITHREADINFO, GWLP_HINSTANCE, MAPVK_VK_TO_VSC_EX, kernel32, user32
 else:
     raise NotImplementedError("Unsupported OS.")
 
@@ -142,14 +141,15 @@ _visual_component_library_class_regex = re.compile(r"""(?x)
     )$
 """)
 _winforms_class_regex = re.compile(r"^WindowsForms\d+\.")
-_WINRT_XAML_CHILD_CLASSES = frozenset({
+_WINRT_XAML_CHILD_CLASSES = frozenset((
     "Windows.UI.Core.CoreWindow",
     #i See also <https://learn.microsoft.com/en-us/uwp/api/windows.ui.core.corewindow>.
     "Windows.UI.Composition.DesktopWindowContentBridge",
     "Microsoft.UI.Content.DesktopChildSiteBridge",
-})
+))
 
-_gtk_dll_regex = re.compile(r"(?i)^libgtk-[\d.-]+\.dll$")
+#. Filenames of loaded modules (DLLs). (Input is lowercased.)
+_gtk_dll_regex = re.compile(r"^libgtk-[\d.-]+\.dll$")
 
 _framework = UIFramework.PENDING
 """Last assessment for communication with Talon scope."""
@@ -290,32 +290,21 @@ class _Detector:
         class ExtraSource(Enum):
             CHILD_WINDOW_TREE = auto()
             MODULE_FILENAMES = auto()
+            OWNER = auto()
             UIA_DATA = auto()
 
-        extra_sources = deque((ExtraSource.CHILD_WINDOW_TREE,))
-
-        def remove_extra_source(source: ExtraSource):
-            nonlocal extra_sources
-            try:
-                extra_sources.remove(source)
-            except ValueError:
-                pass
-
-        def favor_extra_source(source: ExtraSource):
-            nonlocal extra_sources
-            remove_extra_source(source)
-            extra_sources.appendleft(source)
+        extra_sources = (ExtraSource.CHILD_WINDOW_TREE,)
+        is_dialog = False
+        expected_module_based_frameworks = frozenset()  # Not any. Only after other hints.
 
         toplevel_class = toplevel_window.cls  # Win32 class name.
         match toplevel_class:
-            case "#32770":  # Dialog system class.
-                # Try again with owner window, if available.
-                owner_window = _get_owner_window(toplevel_window)
-                #TODO: This regularly detects default open- and save-dialogs incorrectly (e.g., in Balabolka). Maybe check child tree for hints - before owner detection on same PIDs, and after this `case` on different PIDs.
-                if owner_window and owner_window.app.pid == toplevel_window.app.pid:
-                    framework = self._check_toplevel_window_and_its_cache(owner_window, lambda _: None)
-                    if framework.is_concrete:
-                        return framework
+            case (
+                "#32770"  # Dialog system-class.
+                | "NativeHWNDHost"  # At least property-sheet-based dialogs like Windows' `NewLinkHereW()` and `WNetConnectionDialog()`.
+            ):
+                extra_sources = (ExtraSource.CHILD_WINDOW_TREE, ExtraSource.MODULE_FILENAMES, ExtraSource.OWNER)
+                is_dialog = True  # Prevents owner check if module check says standard dialog.
             case "AutoHotkeyGUI":
                 return UIFramework.AUTO_HOTKEY
             case "SunAwtFrame" | "SunAwtDialog":
@@ -325,7 +314,8 @@ class _Detector:
             case "FLUTTER_RUNNER_WIN32_WINDOW":
                 return UIFramework.FLUTTER
             case "gdkWindowToplevel" | "gdkSurfaceToplevel":  # GDK: GIMP Drawing Kit.
-                return self._check_module_filenames(toplevel_window.app.pid, {UIFramework.GTK})
+                extra_sources = (ExtraSource.MODULE_FILENAMES,)
+                expected_module_based_frameworks = {UIFramework.GTK}
             case "MozillaWindowClass":
                 return UIFramework.GECKO
             case "SWT_Window0" | "SWT_WindowShadow0":
@@ -353,16 +343,33 @@ class _Detector:
                     return UIFramework.WIN_FORMS
                 elif toplevel_class.startswith("HwndWrapper["):
                     # Probably WPF.
-                    favor_extra_source(ExtraSource.UIA_DATA)
+                    extra_sources = (ExtraSource.UIA_DATA, ExtraSource.CHILD_WINDOW_TREE)
 
         framework = UIFramework.UNKNOWN
 
+        is_std_dialog = False
         for source in extra_sources:
             match source:
                 case ExtraSource.CHILD_WINDOW_TREE:
                     framework = self._check_child_window_tree(toplevel_window)
+
                 case ExtraSource.MODULE_FILENAMES:
-                    framework = self._check_module_filenames(toplevel_window.app.pid)
+                    (framework, is_std_dialog) = self._check_module_filenames(
+                        toplevel_window,
+                        expected_module_based_frameworks,
+                        wants_dialog_check=is_dialog,
+                    )
+
+                case ExtraSource.OWNER:
+                    if not is_std_dialog:
+                        owner_window = _get_owner_window(toplevel_window)
+                        if owner_window and owner_window.app.pid == toplevel_window.app.pid:
+                            owner_framework = self._check_cache_and_toplevel_window(
+                                owner_window, lambda _: None
+                            )
+                            if owner_framework.is_concrete:
+                                framework = owner_framework
+
                 case ExtraSource.UIA_DATA:
                     framework = self._check_uia_data(toplevel_window)
 
@@ -439,31 +446,79 @@ class _Detector:
 
         return framework
 
-    def _check_module_filenames(self, pid, possible_frameworks: Optional[set[UIFramework]] = None) -> UIFramework:
-        """Tries to recognize the process's UI framework by its module filenames (mostly DLLs)."""
+    def _check_module_filenames(self, toplevel_window: Window, possible_frameworks: Optional[set[UIFramework]] = None, wants_dialog_check: bool = False) -> tuple[UIFramework, bool]:
+        """Tries to recognize the process's UI framework by its module filenames (mostly DLLs).
+        
+        Optionally checks whether the window was created by a Windows DLL known to create standard dialogs. If so, the second return value will be `True`. Besides the case with no such DLL, if a hint for a desired UI framework was found before encountering one of said DLLs, `False` is returned. The argument activating this check should only be set to `True` if the top-level window's class name hints towards a dialog (like `#32770`).
+        """
 
         wants_gtk = possible_frameworks is None or UIFramework.GTK in possible_frameworks
+        wants_any_framework = possible_frameworks is None or len(possible_frameworks) != 0
 
-        process_handle = win32api.OpenProcess(win32con.PROCESS_QUERY_INFORMATION | win32con.PROCESS_VM_READ, False, pid)
+        if wants_dialog_check:
+            # Find out module that created the window.
+            ctypes.set_last_error(winerror.ERROR_SUCCESS)
+            window_module_handle = user32.GetWindowLongPtrW(toplevel_window.id, GWLP_HINSTANCE)
+            if window_module_handle == 0:
+                last_error = ctypes.get_last_error()
+                if last_error:
+                    raise ctypes.WinError(last_error)
 
+        process_handle = win32api.OpenProcess(
+            win32con.PROCESS_QUERY_INFORMATION | win32con.PROCESS_VM_READ,
+            False,
+            toplevel_window.app.pid,
+        )
+
+        plausibly_std_dialog = False
         try:
-            module_handles = win32process.EnumProcessModulesEx(process_handle, LIST_MODULES_ALL)
+            module_handles = win32process.EnumProcessModulesEx(
+                process_handle,
+                win32process.LIST_MODULES_ALL,
+            )
 
             filename_buffer = ctypes.create_unicode_buffer(256)
             #i Maximum path *component* length as per <https://learn.microsoft.com/en-us/windows/win32/fileio/maximum-file-path-limitation>.
 
             for module_handle in module_handles:
-                success = kernel32.K32GetModuleBaseNameW(process_handle.handle, module_handle, filename_buffer, len(filename_buffer))
+                success = kernel32.K32GetModuleBaseNameW(
+                    process_handle.handle,
+                    module_handle,
+                    filename_buffer,
+                    len(filename_buffer),
+                )
                 if not success:
-                    raise ctypes.WinError(ctypes.get_last_error())
-                filename = filename_buffer.value
+                    last_error = ctypes.get_last_error()
+                    if last_error == winerror.ERROR_INVALID_HANDLE:
+                    #i When aggressively loading and unloading DLLs in a test process with a window, this was the only error that occurred; i.e., `EnumProcessModulesEx()` didn't fail. The error is obviously related to unloading a module; when a module was *loaded* while `EnumProcessModulesEx()` ran and wasn't returned, that case must be seen as similar to running this code a few milliseconds earlier when the module also wasn't loaded and apparently can't be handled the same as the unload case.
+                        # Give process a bit of time to settle.
+                        return (UIFramework.PENDING, plausibly_std_dialog)
+                    else:
+                        raise ctypes.WinError(last_error)
+                filename = filename_buffer.value.lower()
 
                 if wants_gtk and _gtk_dll_regex.search(filename):
-                    return UIFramework.GTK
+                    return (UIFramework.GTK, plausibly_std_dialog)
+
+                if (
+                    wants_dialog_check
+                    and module_handle == window_module_handle
+                    and filename in {
+                        "comctl32.dll",  # At least `TaskDialog()`, `NewLinkHereW()`, `WNetConnectionDialog()`.
+                        "comdlg32.dll",  # Open- and save-dialog and many more.
+                        "netplwiz.dll",  # `WNetDisconnectDialog()`.
+                        "shell32.dll",  # At least `SHBrowseForFolderW()`.
+                        "user32.dll",  # `MessageBoxW()`.
+                        #i System Informer shows this in a process's properties dialog under the "Windows" tab in the "Module" column.
+                    }
+                ):
+                    plausibly_std_dialog = True
+                    if not wants_any_framework:
+                        break
         finally:
             process_handle.Close()
 
-        return UIFramework.UNKNOWN
+        return (UIFramework.UNKNOWN, plausibly_std_dialog)
 
     def _check_uia_data(self, toplevel_window: Window, possible_frameworks: Optional[set[UIFramework]] = None) -> UIFramework:
         """Tries to recognize the top-level window's UI framework by its UI Automation data."""
