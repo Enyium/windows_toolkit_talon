@@ -165,8 +165,8 @@ def _on_win_focus(toplevel_window: Window):
     _abort_retry()
     _update_scope(toplevel_window)
 
-def _retry(window: Window):
-    """Plans a retry of assessing the UI framework after a short duration. Raises an exception if a timeout was reached.
+def _schedule_retry(window: Window):
+    """Schedules a retry of assessing the UI framework after a short duration. Raises an exception if a timeout was reached.
 
     This function changes global state.
     """
@@ -180,7 +180,7 @@ def _retry(window: Window):
             _retry_window = None
 
             # Cause `UIFramework.ERROR` up in the call stack.
-            raise RuntimeError("Timeout reached while trying to recognize UI framework.")
+            raise RuntimeError("Couldn't detect UI framework before timeout.")
     else:  # Just starting out.
         _retry_start = time.perf_counter()
 
@@ -229,9 +229,9 @@ class _Detector:
     #i - Detect It Easy (<https://horsicq.github.io/#detect-it-easydie>)
 
     def __call__(self, toplevel_window: Window) -> UIFramework:
-        return self._check_toplevel_window_and_its_cache(toplevel_window, _retry)
+        return self._check_cache_and_toplevel_window(toplevel_window, _schedule_retry)
 
-    def _check_toplevel_window_and_its_cache(self, toplevel_window: Window, retry_or_noop: Callable[[Window], None]) -> UIFramework:
+    def _check_cache_and_toplevel_window(self, toplevel_window: Window, schedule_retry_or_noop: Callable[[Window], None]) -> UIFramework:
         """Reads the top-level window's UI framework from its window properties, or tries to recognize it."""
 
         FRAMEWORK_INT_PROP_NAME = "Talon.SmartInput.UIFramework"
@@ -251,7 +251,7 @@ class _Detector:
 
         # Assess.
         try:
-            framework = self._check_toplevel_window(toplevel_window, retry_or_noop)
+            framework = self._check_toplevel_window(toplevel_window, schedule_retry_or_noop)
 
             # Cache assessment inside window itself.
             if _MUST_CACHE_ASSESSMENT and framework != UIFramework.PENDING:
@@ -284,7 +284,7 @@ class _Detector:
 
         return framework
 
-    def _check_toplevel_window(self, toplevel_window: Window, retry_or_noop: Callable[[Window], None]) -> UIFramework:
+    def _check_toplevel_window(self, toplevel_window: Window, schedule_retry_or_noop: Callable[[Window], None]) -> UIFramework:
         """Tries to recognize the top-level window's UI framework."""
 
         class ExtraSource(Enum):
@@ -372,7 +372,7 @@ class _Detector:
         if toplevel_class == "ApplicationFrameWindow":
         #i Probably hosted UWP app. (Process A has child windows of process B.)
             # Try again until app hopefully loaded in a recognizable manner.
-            retry_or_noop(toplevel_window)
+            schedule_retry_or_noop(toplevel_window)
             framework = UIFramework.PENDING
 
         return framework
