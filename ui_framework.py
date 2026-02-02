@@ -367,6 +367,8 @@ class _Detector:
                     framework = self._check_uia_data(toplevel_window)
 
             if framework != UIFramework.UNKNOWN:
+                if framework == UIFramework.PENDING:
+                    schedule_retry_or_noop(toplevel_window)
                 return framework
 
         if toplevel_class == "ApplicationFrameWindow":
@@ -381,24 +383,41 @@ class _Detector:
         """Tries to recognize the top-level window's UI framework by its Win32 child window tree."""
 
         wants_mfc = possible_frameworks is None or UIFramework.MFC in possible_frameworks
+        wants_swt = possible_frameworks is None or UIFramework.SWT in possible_frameworks
         wants_winrt_xaml = possible_frameworks is None or UIFramework.WINRT_XAML in possible_frameworks
 
-        framework = UIFramework.UNKNOWN
+        framework = UIFramework.PENDING
+        #i Pending as long as we didn't encounter a visible window or a concrete hint. For some apps, some of the time, like Windows Explorer, all child windows are invisible directly after start.
+        has_children = False
+        has_visible_window = False
 
         def handle_child_window(hwnd, _):
-            nonlocal framework
+            nonlocal framework, has_children, has_visible_window
 
             try:
                 child_class = win32gui.GetClassName(hwnd)
-            except pywintypes.error as e:
+
+                if not has_visible_window:
+                    ctypes.set_last_error(winerror.ERROR_SUCCESS)
+                    is_visible = user32.IsWindowVisible(hwnd)  # Also checks ancestor visibility.
+                    if not is_visible:
+                        last_error = ctypes.get_last_error()
+                        if last_error:
+                            raise ctypes.WinError(last_error)
+                    else:
+                        has_visible_window = True
+            except (pywintypes.error, OSError) as e:
                 if e.winerror == winerror.ERROR_INVALID_WINDOW_HANDLE:
-                    return True  # Continue.
+                    return True  # Continue loop.
                 else:
                     raise
 
-            #i The order of the checks can be relevant. See also other comment regarding DirectUI.
-            if wants_mfc and _mfc_class_regex.search(child_class):
-                framework = UIFramework.MFC
+            has_children = True
+
+            #i The order of the checks can be relevant. See also other comment regarding DirectUI. Let's keep the most conclusive hints at the top.
+            if wants_swt and child_class == "SWT_Window0":
+            #i Relevant in dialogs with top-level class `#32770`.
+                framework = UIFramework.SWT
                 return False
             if wants_winrt_xaml and child_class in _WINRT_XAML_CHILD_CLASSES:
                 # if _retry_job:
@@ -406,10 +425,18 @@ class _Detector:
 
                 framework = UIFramework.WINRT_XAML
                 return False
+            if wants_mfc and _mfc_class_regex.search(child_class):
+                framework = UIFramework.MFC
+                return False
 
             return True
 
         win32gui.EnumChildWindows(toplevel_window.id, handle_child_window, None)
+        if framework == UIFramework.PENDING and (
+            not has_children or has_visible_window
+        ):
+            framework = UIFramework.UNKNOWN
+
         return framework
 
     def _check_module_filenames(self, pid, possible_frameworks: Optional[set[UIFramework]] = None) -> UIFramework:
