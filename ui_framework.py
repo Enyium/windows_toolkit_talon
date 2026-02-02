@@ -78,6 +78,7 @@ class UIFramework(StrCarryingOneBasedIntEnum):
     """- Also reported as such by UI Automation API
     - Apps: Firefox, Firefox derivates, Thunderbird, Zotero"""
 
+    #TODO: Use GDK instead of GTK, because it's about event loop matters and automation? (Similar to AWT for Swing, and WinRT XAML for WinUI 3 etc.)
     GTK = "GTK"
     """- Originally "GIMP Toolkit"
     - Apps: Inkscape, Qalculate (one variant), Czkawka"""
@@ -215,7 +216,7 @@ def _ui_framework_scope():
 
 
 class _Detector:
-    """Calling an instance detects the specified top-level window's UI framework, specifically with regard to event loop matters and automating the window.
+    """Calling an instance detects the specified top-level window's UI framework, specifically with regard to event loop matters and automating the window, and not so much with regard to widget libraries, skins, or look and feel.
 
     Parts of a window may still be handled by other frameworks, which this class doesn't cover: E.g., data display controls in the Windows 11 Task Manager, or the file display in the OS's open- and save-dialogs are implemented by DirectUI, and SWT uses Win32 controls.
     """
@@ -378,11 +379,13 @@ class _Detector:
                     schedule_retry_or_noop(toplevel_window)
                 return framework
 
-        if toplevel_class == "ApplicationFrameWindow":
-        #i Probably hosted UWP app. (Process A has child windows of process B.)
-            # Try again until app hopefully loaded in a recognizable manner.
-            schedule_retry_or_noop(toplevel_window)
+        if (
+            framework == UIFramework.UNKNOWN
+            and toplevel_class == "ApplicationFrameWindow"
+            #i Probably hosted UWP app. (Process A has child windows of process B.)
+        ):
             framework = UIFramework.PENDING
+            schedule_retry_or_noop(toplevel_window)
 
         return framework
 
