@@ -5,6 +5,7 @@ kernel32 = ctypes.WinDLL("kernel32.dll", use_last_error=True)
 user32 = ctypes.WinDLL("user32.dll", use_last_error=True)
 
 GWLP_HINSTANCE = -6
+GWLP_ID = -12
 MAPVK_VK_TO_VSC_EX = 4
 SMTO_ERRORONEXIT = 0x0020
 

@@ -27,12 +27,19 @@ if app.platform == "windows" or TYPE_CHECKING:
 
     from talon.windows import ax
 
-    from .lib.winapi import GUITHREADINFO, GWLP_HINSTANCE, MAPVK_VK_TO_VSC_EX, kernel32, user32
+    from .lib.winapi import GUITHREADINFO, GWLP_HINSTANCE, GWLP_ID, MAPVK_VK_TO_VSC_EX, kernel32, user32
 else:
     raise NotImplementedError("Unsupported OS.")
 
+#. Debug flags.
+_MUST_LOG_ASSESSMENT = False
+"""Whether the UI framework assessment should be printed to Talon's log after every window activation (may be read from cache)."""
 _MUST_CACHE_ASSESSMENT = True
-"""Can be turned off for debug purposes."""
+"""Whether the UI framework assessment is saved to and read from each window's property list. Talon reloading this Python module invalidates previously cached data."""
+_MUST_LOG_CHILD_WINDOWS = False
+"""Whether each child window before loop abortion should be printed to Talon's log. `True` can be used in conjunction with `_MAY_ABORT_CHILD_WINDOW_LOOP_EARLY = False` to always log all child windows."""
+_MAY_ABORT_CHILD_WINDOW_LOOP_EARLY = True
+"""Whether the child window loop may be aborted as soon as a UI framework hint was found. As a side effect, if different UI framework hints are present in the child window tree, this may change which one applies."""
 
 _script_load_time_ns = time.perf_counter_ns()
 _mod = Module()
@@ -203,6 +210,9 @@ def _update_scope(toplevel_window: Window):
 
     _framework = _Detector()(toplevel_window)
     #i Shouldn't raise exceptions (see implementation).
+
+    if _MUST_LOG_ASSESSMENT:
+        print(f"UI framework (window ID {toplevel_window.id:#010x}): {_framework}")
 
     _ui_framework_scope.update()
 
@@ -396,10 +406,14 @@ class _Detector:
         wants_swt = possible_frameworks is None or UIFramework.SWT in possible_frameworks
         wants_winrt_xaml = possible_frameworks is None or UIFramework.WINRT_XAML in possible_frameworks
 
+        if _MUST_LOG_CHILD_WINDOWS:
+            print(f"Traversing top-level window `{toplevel_window}` (ID {toplevel_window.id:#x}).")
+
         framework = UIFramework.PENDING
         #i Pending as long as we didn't encounter a visible window or a concrete hint. For some apps, some of the time, like Windows Explorer, all child windows are invisible directly after start.
         has_children = False
         has_visible_window = False
+        done_retval = not _MAY_ABORT_CHILD_WINDOW_LOOP_EARLY  # `False` breaks loop.
 
         def handle_child_window(hwnd, _):
             nonlocal framework, has_children, has_visible_window
@@ -407,7 +421,7 @@ class _Detector:
             try:
                 child_class = win32gui.GetClassName(hwnd)
 
-                if not has_visible_window:
+                if not has_visible_window or _MUST_LOG_CHILD_WINDOWS:
                     ctypes.set_last_error(winerror.ERROR_SUCCESS)
                     is_visible = user32.IsWindowVisible(hwnd)  # Also checks ancestor visibility.
                     if not is_visible:
@@ -416,11 +430,22 @@ class _Detector:
                             raise ctypes.WinError(last_error)
                     else:
                         has_visible_window = True
+
+                if _MUST_LOG_CHILD_WINDOWS:
+                    ctypes.set_last_error(winerror.ERROR_SUCCESS)
+                    control_id = user32.GetWindowLongPtrW(hwnd, GWLP_ID)
+                    if control_id == 0:
+                        last_error = ctypes.get_last_error()
+                        if last_error:
+                            raise ctypes.WinError(last_error)
             except (pywintypes.error, OSError) as e:
                 if e.winerror == winerror.ERROR_INVALID_WINDOW_HANDLE:
                     return True  # Continue loop.
                 else:
                     raise
+
+            if _MUST_LOG_CHILD_WINDOWS:  # Debug flag, normally `False`.
+                print(f"Child window: {'  visible' if is_visible else 'invisible'}, HWND {hwnd:#010x}, control ID {control_id:#06x}, class \"{child_class}\"")
 
             has_children = True
 
@@ -428,16 +453,16 @@ class _Detector:
             if wants_swt and child_class == "SWT_Window0":
             #i Relevant in dialogs with top-level class `#32770`.
                 framework = UIFramework.SWT
-                return False
+                return done_retval
             if wants_winrt_xaml and child_class in _WINRT_XAML_CHILD_CLASSES:
                 # if _retry_job:
                 #     print(f"Duration until recognition: {(time.perf_counter() - _retry_start) * 1000:.0f} ms")
 
                 framework = UIFramework.WINRT_XAML
-                return False
+                return done_retval
             if wants_mfc and _mfc_class_regex.search(child_class):
                 framework = UIFramework.MFC
-                return False
+                return done_retval
 
             return True
 
@@ -446,6 +471,8 @@ class _Detector:
             not has_children or has_visible_window
         ):
             framework = UIFramework.UNKNOWN
+        if _MUST_LOG_CHILD_WINDOWS and not has_children:
+            print("No child windows found.")
 
         return framework
 
