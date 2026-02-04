@@ -170,7 +170,12 @@ _retry_start = 0
 _retry_window = None
 
 def _script_main():
+    _ui_framework_scope.update()
+    app.register("ready", _on_ready)
     ui.register("win_focus", _on_win_focus)
+
+def _on_ready():
+    _update_scope(ui.active_window())
 
 def _on_win_focus(toplevel_window: Window):
     _abort_retry()
