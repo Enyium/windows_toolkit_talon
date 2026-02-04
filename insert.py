@@ -91,6 +91,7 @@ class _InsertSession:
         self._insertion_pid = active_window.app.pid
 
         self._gui_thread_info = wapi.new("GUITHREADINFO *", {"cbSize": wapi.sizeof("GUITHREADINFO")})
+        self._menu_active_at_start = False
 
     def __call__(self, text):
         # Text to UTF-16 code units.
@@ -98,6 +99,14 @@ class _InsertSession:
         code_units = memoryview(utf16le_bytes).cast("@H")  # Native-endian unsigned short.
         if not _is_well_formed_utf16(code_units):
             raise ValueError("Malformed UTF-16.")
+
+        # Limit insertion, if menu active.
+        self._fill_gui_thread_info()
+        if self._gui_thread_info.flags & (win32con.GUI_SYSTEMMENUMODE | win32con.GUI_INMENUMODE | win32con.GUI_POPUPMENUMODE):
+            self._menu_active_at_start = True
+            if len(text) > 1:
+                raise RuntimeError("Received more than one character to insert while is menu active. Text insertion aborted.")
+        #i See also `flush()`.
 
         # Create event queue.
         if not self._must_wait_for_stable_caret and self._char_pause_duration > 0:
@@ -201,7 +210,7 @@ class _InsertSession:
         if self._num_events <= 0:
             return
 
-        # Check for various obstacles.
+        # Check for various obstacles. (Exceptions could theoretically lead to key-down without key-up event. Severity yet unknown.)
         if self._abort_on_window_xor_app_change:
             active_window = ui.active_window()
             if active_window.id != self._insertion_hwnd:
@@ -212,9 +221,10 @@ class _InsertSession:
                 raise RuntimeError(f"Active app changed during text insertion. Insertion aborted. Displacing window and app: `{active_window}` (ID {hex(active_window.id)}).")
 
         self._fill_gui_thread_info()
-        if self._gui_thread_info.flags & (win32con.GUI_SYSTEMMENUMODE | win32con.GUI_INMENUMODE | win32con.GUI_POPUPMENUMODE):
-            raise RuntimeError("Menu active. Text insertion aborted.")
-        #i This technique only works for traditional Win32 menus incl. a window's system menu. The universal way would be to check whether `talon.windows.ax.get_focused_element().control_type` is `"MenuBar"` or `"MenuItem"`. But unfortunately, this API is very slow and would introduce a delay of up to about 83 ms according to the author's measurements before every flush.
+        menu_active = self._gui_thread_info.flags & (win32con.GUI_SYSTEMMENUMODE | win32con.GUI_INMENUMODE | win32con.GUI_POPUPMENUMODE)
+        if not self._menu_active_at_start and menu_active:
+            raise RuntimeError("Menu appeared. Text insertion aborted.")
+        #i This technique only works for traditional Win32 menus incl. a window's system menu. The universal way would be to check whether `talon.windows.ax.get_focused_element().control_type` is `"MenuBar"` or `"MenuItem"`. But unfortunately, this API is very slow and would introduce a delay of up to about 83 ms before most flushes, according to the author's measurements.
 
         if self._gui_thread_info.flags & win32con.GUI_INMOVESIZE:
             raise RuntimeError("Window is being moved or resized. Text insertion aborted.")
