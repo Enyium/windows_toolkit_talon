@@ -1,3 +1,7 @@
+"""
+Reimplements Talon's `insert()` function, and provides Talon settings that allow it to be configured.
+"""
+
 import ctypes
 import time
 from typing import TYPE_CHECKING
@@ -5,15 +9,11 @@ from typing import TYPE_CHECKING
 from talon import Context, Module, actions, app, settings, ui
 
 if app.platform == "windows" or TYPE_CHECKING:
-    from ctypes import wintypes
-
-    import pywintypes
     import win32api
     import win32con
-    import win32gui
     import winerror
 
-    from .lib.winapi import INPUT, GUITHREADINFO, MAPVK_VK_TO_VSC_EX, SMTO_ERRORONEXIT, user32
+    from .lib.winapi import kernel32, user32, wapi
 else:
     raise NotImplementedError("Unsupported OS.")
 
@@ -41,8 +41,8 @@ _mod.setting(
 
 _ctx = Context()
 
-#. Seconds until insertion is aborted.
 _INSERTION_TIMEOUT = 30
+"""Seconds until insertion is aborted."""
 
 
 @_ctx.action_class("main")
@@ -90,7 +90,7 @@ class _InsertSession:
         self._insertion_hwnd = active_window.id
         self._insertion_pid = active_window.app.pid
 
-        self._gui_thread_info = GUITHREADINFO(cbSize=ctypes.sizeof(GUITHREADINFO))
+        self._gui_thread_info = wapi.new("GUITHREADINFO *", {"cbSize": wapi.sizeof("GUITHREADINFO")})
 
     def __call__(self, text):
         # Text to UTF-16 code units.
@@ -106,7 +106,7 @@ class _InsertSession:
         else:
             # Down and up for every code unit.
             capacity = len(code_units) * 2
-        self._events = (INPUT * capacity)()
+        self._events = wapi.new("INPUT[]", capacity)
         self._num_events = 0
 
         # Send events.
@@ -124,7 +124,7 @@ class _InsertSession:
 
             is_surrogate = code_unit >= 0xD800 and code_unit <= 0xDFFF
 
-            for up in [False, True]:
+            for up in (False, True):
                 if not up:
                     #TODO: WITH SUITABLE TEST APP: With regard to suggestion windows, it could be necessary to also wait for caret stabilization before `\N{esc}`, `\t` and `\n` (suggestions are confirmed with Tab and/or Enter, depending on the app and its settings). But a test app would be needed that has suggestion windows, reports its caret, and benefits from caret stabilization. Depending on the settings, these additional pauses could undesirably add to `key_hold` pauses.
                     if self._must_wait_for_stable_caret and is_surrogate and not had_surrogate:
@@ -157,44 +157,43 @@ class _InsertSession:
             self._wait_for_stable_caret()
 
     def _push_vk_event(self, vk: int, up: bool):
-        scancode = win32api.MapVirtualKey(vk, MAPVK_VK_TO_VSC_EX)
+        scancode = win32api.MapVirtualKey(vk, user32.MAPVK_VK_TO_VSC_EX)
         has_e0_extended_scan_code = (scancode & 0xFF00) == 0xE000
-        #i AI GPT-5.2 thinks `wScan` must not contain the extended-prefix. But the docs for `KEYEVENTF_EXTENDEDKEY` seem to say otherwise.
-        #i
-        #i We just ignore 0 on missing translation, because we don't use `KEYEVENTF_SCANCODE`, but primarily rely on the virtual-key code. The scancode is just for maximizing compatibility.
+        #i - AI GPT-5.2 thinks `wScan` must not contain the extended-prefix. But the docs for `KEYEVENTF_EXTENDEDKEY` seem to say otherwise.
+        #i - We just ignore 0 on missing translation, because we don't use `KEYEVENTF_SCANCODE`, but primarily rely on the virtual-key code. The scancode is just for maximizing compatibility.
 
         event = self._events[self._num_events]
 
         event.type = win32con.INPUT_KEYBOARD
-        event.ki.wVk = vk
-        event.ki.wScan = scancode
+        event.DUMMYUNIONNAME.ki.wVk = vk
+        event.DUMMYUNIONNAME.ki.wScan = scancode
 
         flags = 0
         if has_e0_extended_scan_code:
             flags |= win32con.KEYEVENTF_EXTENDEDKEY
         if up:
             flags |= win32con.KEYEVENTF_KEYUP
-        event.ki.dwFlags = flags
+        event.DUMMYUNIONNAME.ki.dwFlags = flags
 
-        event.ki.time = 0
-        event.ki.dwExtraInfo = 0
+        event.DUMMYUNIONNAME.ki.time = 0
+        event.DUMMYUNIONNAME.ki.dwExtraInfo = 0
 
         self._num_events += 1
-    
+
     def _push_utf16_code_unit_event(self, code_unit: int, up: bool):
         event = self._events[self._num_events]
 
         event.type = win32con.INPUT_KEYBOARD
-        event.ki.wVk = 0
-        event.ki.wScan = code_unit
+        event.DUMMYUNIONNAME.ki.wVk = 0
+        event.DUMMYUNIONNAME.ki.wScan = code_unit
 
         flags = win32con.KEYEVENTF_UNICODE
         if up:
             flags |= win32con.KEYEVENTF_KEYUP
-        event.ki.dwFlags = flags
+        event.DUMMYUNIONNAME.ki.dwFlags = flags
 
-        event.ki.time = 0
-        event.ki.dwExtraInfo = 0
+        event.DUMMYUNIONNAME.ki.time = 0
+        event.DUMMYUNIONNAME.ki.dwExtraInfo = 0
 
         self._num_events += 1
 
@@ -206,13 +205,13 @@ class _InsertSession:
         if self._abort_on_window_xor_app_change:
             active_window = ui.active_window()
             if active_window.id != self._insertion_hwnd:
-                raise RuntimeError(f"Active window changed during text insertion. Insertion aborted. Displacing window and app: `{active_window}` (HWND: {hex(active_window.id)}).")
+                raise RuntimeError(f"Active window changed during text insertion. Insertion aborted. Displacing window and app: `{active_window}` (ID {hex(active_window.id)}).")
         else:
             active_window = ui.active_window()
             if active_window.app.pid != self._insertion_pid:
-                raise RuntimeError(f"Active app changed during text insertion. Insertion aborted. Displacing window and app: `{active_window}` (HWND: {hex(active_window.id)}).")
+                raise RuntimeError(f"Active app changed during text insertion. Insertion aborted. Displacing window and app: `{active_window}` (ID {hex(active_window.id)}).")
 
-        self._get_gui_thread_info()
+        self._fill_gui_thread_info()
         if self._gui_thread_info.flags & (win32con.GUI_SYSTEMMENUMODE | win32con.GUI_INMENUMODE | win32con.GUI_POPUPMENUMODE):
             raise RuntimeError("Menu active. Text insertion aborted.")
         #i This technique only works for traditional Win32 menus incl. a window's system menu. The universal way would be to check whether `talon.windows.ax.get_focused_element().control_type` is `"MenuBar"` or `"MenuItem"`. But unfortunately, this API is very slow and would introduce a delay of up to about 83 ms according to the author's measurements before every flush.
@@ -231,10 +230,10 @@ class _InsertSession:
 
         # Send queued events.
         num_events_sent = user32.SendInput(
-            self._num_events, self._events, ctypes.sizeof(INPUT)
+            self._num_events, self._events, wapi.sizeof("INPUT")
         )
         if num_events_sent == 0:
-            raise ctypes.WinError(ctypes.get_last_error())
+            raise ctypes.WinError(kernel32.GetLastError())
         if num_events_sent != self._num_events:
             raise RuntimeError("Failed to send all keyboard input requests.")
 
@@ -242,11 +241,13 @@ class _InsertSession:
         self._num_events = 0
 
     def _wait_for_stable_caret(self):
-        self._get_gui_thread_info()
+        self._fill_gui_thread_info()
 
         if not (self._gui_thread_info.flags & win32con.GUI_CARETBLINKING):
             # Change insertion mode. Previous mass event enqueuing may cause problems that may be unavoidable at this point.
             self._must_wait_for_stable_caret = False
+            print("WARNING: Couldn't wait for stable caret during text insertion, because Win32 API didn't report one.")
+            #i If this happens even though the app displayed a caret when this code ran, the user must configure the `insert()` override to not wait for caret stabilization.
             return
 
         # Try to ensure window reacts quickly enough. (It may not on very high CPU load, e.g.)
@@ -256,47 +257,53 @@ class _InsertSession:
         if not hwnd:
             raise RuntimeError("Couldn't determine window.")
 
-        try:
-            win32gui.SendMessageTimeout(
-                hwnd,
-                win32con.WM_NULL,
-                0,
-                0,
-                win32con.SMTO_BLOCK | SMTO_ERRORONEXIT,
-                UNREACTIVE_TIMEOUT_MS,
-            )
-        except pywintypes.error as e:
-            if e.winerror == winerror.ERROR_TIMEOUT:
+        kernel32.SetLastError(winerror.ERROR_SUCCESS)
+        success = user32.SendMessageTimeoutW(
+            hwnd,
+            win32con.WM_NULL,
+            0,
+            0,
+            win32con.SMTO_BLOCK | user32.SMTO_ERRORONEXIT,
+            UNREACTIVE_TIMEOUT_MS,
+            wapi.NULL,
+        )
+        if not success:
+            last_error = kernel32.GetLastError()
+            if last_error == winerror.ERROR_TIMEOUT:
                 raise RuntimeError("Text insertion window was to slow to react.")
             else:
-                raise
+                raise ctypes.WinError(last_error)
 
         # Wait for caret.
-        num_empty_rects = 0
+        is_first = True
+        num_successive_empty_rects = 0
 
-        last_rect = wintypes.RECT()
-        last_rect_fields = memoryview(last_rect).cast("B").cast("l")
+        last_rect = wapi.new("RECT *")
+        last_rect_fields = memoryview(wapi.buffer(
+            last_rect, wapi.sizeof("RECT")
+        )).cast("l")
+        rect_fields = memoryview(wapi.buffer(
+            wapi.addressof(self._gui_thread_info, "rcCaret"), wapi.sizeof("RECT")
+        )).cast("l")
+        #i The `GetGUIThreadInfo()` docs' remarks talk about strange encoding of special values in `rcCaret`. But since we just wait for the values to stabilize, we assume that this doesn't matter.
 
         last_move_time = time.perf_counter()
 
         while True:
-            self._get_gui_thread_info()
-            rect = self._gui_thread_info.rcCaret
-            rect_fields = memoryview(rect).cast("B").cast("l")
-            #i The `GetGUIThreadInfo()` docs' remarks talk about strange encoding of special values in `rcCaret`. But since we just wait for the values to stabilize, we assume that this doesn't matter.
+            self._fill_gui_thread_info()
 
-            if last_rect is None:
-                # Fetch first rect to get going.
-                pass
-            elif not any(rect_fields):
-                # Tolerate only a couple of empty rects that sporadically may be returned.
-                num_empty_rects += 1
-                if num_empty_rects >= 5:
+            if not any(rect_fields):
+                # Tolerate only a couple of empty rects in succession that sporadically may be returned.
+                num_successive_empty_rects += 1
+                if num_successive_empty_rects >= 10:
                     # Give up and change insertion mode.
                     self._must_wait_for_stable_caret = False
+                    print("WARNING: Waiting for stable caret during text insertion aborted because of too many missing caret position data points.")
                     break
-            else:
+            elif not is_first:
+                num_successive_empty_rects = 0
                 now = time.perf_counter()
+
                 if rect_fields != last_rect_fields:
                     # Reset.
                     last_move_time = now
@@ -307,13 +314,14 @@ class _InsertSession:
                 if now - self._start_time >= _INSERTION_TIMEOUT:
                     raise RuntimeError("Text insertion took too long while waiting for caret to stop moving.")
 
-            actions.sleep(0.001)  # Throttle.
+            actions.sleep(0.010)  # Throttle.
             last_rect_fields[:] = rect_fields
+            is_first = False
 
-    def _get_gui_thread_info(self):
-        success = user32.GetGUIThreadInfo(0, ctypes.byref(self._gui_thread_info))
+    def _fill_gui_thread_info(self):
+        success = user32.GetGUIThreadInfo(0, self._gui_thread_info)
         if not success:
-            raise ctypes.WinError(ctypes.get_last_error())
+            raise ctypes.WinError(kernel32.GetLastError())
 
 
 def _is_well_formed_utf16(code_units):

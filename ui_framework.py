@@ -1,7 +1,7 @@
 """
-This file makes the `user.ui_framework` Talon scope available that can be used for window matching. The assessments are cached in the windows themselves using window properties. Whenever Talon reloads the file, the assessments are reset (without removing the window properties).
+This file makes the `user.ui_framework` Talon scope available that can be used for window matching. See the `UIFramework` enum for possible string values. The assessments are cached in the windows themselves using window properties. Whenever Talon reloads this file, the assessments are reset (without removing the window properties).
 
-The file also prepares some frameworks' windows for automation in an indiscernible manner whenever they're activated.
+The file also prepares some frameworks' windows for text insertion in an indiscernible manner whenever they're activated.
 """
 
 import ctypes
@@ -27,7 +27,7 @@ if app.platform == "windows" or TYPE_CHECKING:
 
     from talon.windows import ax
 
-    from .lib.winapi import GUITHREADINFO, GWLP_HINSTANCE, GWLP_ID, MAPVK_VK_TO_VSC_EX, kernel32, user32
+    from .lib.winapi import kernel32, user32, w, wapi
 else:
     raise NotImplementedError("Unsupported OS.")
 
@@ -159,6 +159,9 @@ _WINRT_XAML_CHILD_CLASSES = frozenset((
 #. Filenames of loaded modules (DLLs). (Input is lowercased.)
 _gtk_dll_regex = re.compile(r"^libgtk-[\d.-]+\.dll$")
 
+_FRAMEWORK_INT_PROP_NAME = w("Talon.SmartInput.UIFramework")
+_ASSESSMENT_TIME_NS_PROP_NAME = w("Talon.SmartInput.UIFrameworkAssessmentTimeNS")
+
 _framework = UIFramework.PENDING
 """Last assessment for communication with Talon scope."""
 
@@ -245,16 +248,17 @@ class _Detector:
     def _check_cache_and_toplevel_window(self, toplevel_window: Window, schedule_retry_or_noop: Callable[[Window], None]) -> UIFramework:
         """Reads the top-level window's UI framework from its window properties, or tries to recognize it."""
 
-        FRAMEWORK_INT_PROP_NAME = "Talon.SmartInput.UIFramework"
-        ASSESSMENT_TIME_NS_PROP_NAME = "Talon.SmartInput.UIFrameworkAssessmentTimeNS"
-
         # Read cached assessment, if available.
         if _MUST_CACHE_ASSESSMENT:
-            cached_assessment_time_ns = user32.GetPropW(toplevel_window.id, ASSESSMENT_TIME_NS_PROP_NAME)
+            cached_assessment_time_ns = int(wapi.cast("uintptr_t",
+                user32.GetPropW(wapi.cast("HWND", toplevel_window.id), _ASSESSMENT_TIME_NS_PROP_NAME)
+            ))
             if cached_assessment_time_ns and cached_assessment_time_ns >= _script_load_time_ns:
             #i Enum may have been changed before script reload.
                 try:
-                    framework = UIFramework(user32.GetPropW(toplevel_window.id, FRAMEWORK_INT_PROP_NAME))
+                    framework = UIFramework(int(wapi.cast("uintptr_t",
+                        user32.GetPropW(wapi.cast("HWND", toplevel_window.id), _FRAMEWORK_INT_PROP_NAME)
+                    )))
                     if framework != UIFramework.PENDING:
                         return framework
                 except ValueError:
@@ -267,13 +271,17 @@ class _Detector:
             # Cache assessment inside window itself.
             if _MUST_CACHE_ASSESSMENT and framework != UIFramework.PENDING:
                 for (prop_name, value) in (
-                    (FRAMEWORK_INT_PROP_NAME, int(framework)),
-                    (ASSESSMENT_TIME_NS_PROP_NAME, time.perf_counter_ns()),  # Dependent on 64-bit process.
+                    (_FRAMEWORK_INT_PROP_NAME, int(framework)),
+                    (_ASSESSMENT_TIME_NS_PROP_NAME, time.perf_counter_ns()),  # Dependent on 64-bit process.
                     #i Setting the UI framework first is important. If we'd set the assessment time first and then setting the UI framework failed, we would have presented the old UI framework value as valid in the current context.
                 ):
-                    success = user32.SetPropW(toplevel_window.id, prop_name, value)
+                    success = user32.SetPropW(
+                        wapi.cast("HWND", toplevel_window.id),
+                        prop_name,
+                        wapi.cast("HANDLE", value)
+                    )
                     if not success:
-                        last_error = ctypes.get_last_error()
+                        last_error = kernel32.GetLastError()
                         if last_error == winerror.ERROR_INVALID_WINDOW_HANDLE:
                             break
                         else:
@@ -422,20 +430,20 @@ class _Detector:
                 child_class = win32gui.GetClassName(hwnd)
 
                 if not has_visible_window or _MUST_LOG_CHILD_WINDOWS:
-                    ctypes.set_last_error(winerror.ERROR_SUCCESS)
-                    is_visible = user32.IsWindowVisible(hwnd)  # Also checks ancestor visibility.
+                    kernel32.SetLastError(winerror.ERROR_SUCCESS)
+                    is_visible = user32.IsWindowVisible(wapi.cast("HWND", hwnd))  # Also checks ancestor visibility.
                     if not is_visible:
-                        last_error = ctypes.get_last_error()
+                        last_error = kernel32.GetLastError()
                         if last_error:
                             raise ctypes.WinError(last_error)
                     else:
                         has_visible_window = True
 
                 if _MUST_LOG_CHILD_WINDOWS:
-                    ctypes.set_last_error(winerror.ERROR_SUCCESS)
-                    control_id = user32.GetWindowLongPtrW(hwnd, GWLP_ID)
+                    kernel32.SetLastError(winerror.ERROR_SUCCESS)
+                    control_id = user32.GetWindowLongPtrW(wapi.cast("HWND", hwnd), user32.GWLP_ID)
                     if control_id == 0:
-                        last_error = ctypes.get_last_error()
+                        last_error = kernel32.GetLastError()
                         if last_error:
                             raise ctypes.WinError(last_error)
             except (pywintypes.error, OSError) as e:
@@ -444,7 +452,7 @@ class _Detector:
                 else:
                     raise
 
-            if _MUST_LOG_CHILD_WINDOWS:  # Debug flag, normally `False`.
+            if _MUST_LOG_CHILD_WINDOWS:
                 print(f"Child window: {'  visible' if is_visible else 'invisible'}, HWND {hwnd:#010x}, control ID {control_id:#06x}, class \"{child_class}\"")
 
             has_children = True
@@ -467,6 +475,7 @@ class _Detector:
             return True
 
         win32gui.EnumChildWindows(toplevel_window.id, handle_child_window, None)
+        #i WinAPI function officially doesn't report errors, but `has_children` will be `False`.
         if framework == UIFramework.PENDING and (
             not has_children or has_visible_window
         ):
@@ -487,10 +496,13 @@ class _Detector:
 
         if wants_dialog_check:
             # Find out module that created the window.
-            ctypes.set_last_error(winerror.ERROR_SUCCESS)
-            window_module_handle = user32.GetWindowLongPtrW(toplevel_window.id, GWLP_HINSTANCE)
+            kernel32.SetLastError(winerror.ERROR_SUCCESS)
+            window_module_handle = user32.GetWindowLongPtrW(
+                wapi.cast("HWND", toplevel_window.id),
+                user32.GWLP_HINSTANCE
+            )
             if window_module_handle == 0:
-                last_error = ctypes.get_last_error()
+                last_error = kernel32.GetLastError()
                 if last_error:
                     raise ctypes.WinError(last_error)
 
@@ -507,25 +519,25 @@ class _Detector:
                 win32process.LIST_MODULES_ALL,
             )
 
-            filename_buffer = ctypes.create_unicode_buffer(256)
+            filename_buffer = wapi.new("WCHAR[]", 256)
             #i Maximum path *component* length as per <https://learn.microsoft.com/en-us/windows/win32/fileio/maximum-file-path-limitation>.
 
             for module_handle in module_handles:
                 success = kernel32.K32GetModuleBaseNameW(
-                    process_handle.handle,
-                    module_handle,
+                    wapi.cast("HANDLE", process_handle.handle),
+                    wapi.cast("HMODULE", module_handle),
                     filename_buffer,
                     len(filename_buffer),
                 )
                 if not success:
-                    last_error = ctypes.get_last_error()
+                    last_error = kernel32.GetLastError()
                     if last_error == winerror.ERROR_INVALID_HANDLE:
                     #i When aggressively loading and unloading DLLs in a test process with a window, this was the only error that occurred; i.e., `EnumProcessModulesEx()` didn't fail. The error is obviously related to unloading a module; when a module was *loaded* while `EnumProcessModulesEx()` ran and wasn't returned, that case must be seen as similar to running this code a few milliseconds earlier when the module also wasn't loaded and apparently can't be handled the same as the unload case.
                         # Give process a bit of time to settle.
                         return (UIFramework.PENDING, plausibly_std_dialog)
                     else:
                         raise ctypes.WinError(last_error)
-                filename = filename_buffer.value.lower()
+                filename = wapi.string(filename_buffer).lower()
 
                 if wants_gtk and _gtk_dll_regex.search(filename):
                     return (UIFramework.GTK, plausibly_std_dialog)
@@ -585,17 +597,17 @@ def _prepare_active_window(framework: UIFramework):
     if framework == UIFramework.QT:
         #i When a Qt window is activated, its caret may first not be reported by `GetGUIThreadInfo()` anymore, which would be very useful for the `insert()` override. As it turns out, just briefly pressing the Shift key makes the caret be reported again. When trying to automate this, an attempt to send Shift via `SendInput()` didn't work. With `SendMessage()`, it worked. But sending `VK_NONAME` is even more innocuous and also works. (Tested in output pane of gImageReader v3.4.3.)
 
-        gui_thread_info = GUITHREADINFO(cbSize=ctypes.sizeof(GUITHREADINFO))
-        success = user32.GetGUIThreadInfo(0, ctypes.byref(gui_thread_info))
+        gui_thread_info = wapi.new("GUITHREADINFO *", {"cbSize": wapi.sizeof("GUITHREADINFO")})
+        success = user32.GetGUIThreadInfo(0, gui_thread_info)
         if not success:
-            raise ctypes.WinError(ctypes.get_last_error())
+            raise ctypes.WinError(kernel32.GetLastError())
 
-        hwnd = gui_thread_info.hwndFocus or gui_thread_info.hwndActive
+        hwnd = int(wapi.cast("uintptr_t", gui_thread_info.hwndFocus or gui_thread_info.hwndActive))
         if not hwnd:
             raise RuntimeError("Couldn't determine window for preparation after UI framework detection.")
 
         vk = win32con.VK_NONAME
-        scancode = win32api.MapVirtualKey(vk, MAPVK_VK_TO_VSC_EX)
+        scancode = win32api.MapVirtualKey(vk, user32.MAPVK_VK_TO_VSC_EX)
         is_extended_scancode = bool(scancode & 0xFF00)
 
         shared_lparam = (
