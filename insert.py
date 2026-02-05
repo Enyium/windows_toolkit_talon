@@ -19,6 +19,10 @@ else:
 
 _mod = Module()
 
+_mod.tag(
+    "smart_input_insert_active",
+    desc="Activates Smart Input's `insert()` override.",
+)
 _mod.setting(
     "char_pause_ms",
     type=float,
@@ -40,6 +44,9 @@ _mod.setting(
 #i Setting `user.abort_insert_merely_on_app_change` unavailable for now. More information is needed what window activation is actually happening in the rare case that input is aborted by it (experienced in VS Code, but its suggestion overlays aren't Win32 windows, let alone top-level windows).
 
 _ctx = Context()
+_ctx.matches = r"""
+tag: user.smart_input_insert_active
+"""
 
 _INSERTION_TIMEOUT = 30
 """Seconds until insertion is aborted."""
@@ -94,7 +101,7 @@ class _InsertSession:
         self._menu_active_at_start = False
 
     def __call__(self, text):
-        # Text to UTF-16 code units.
+        # Convert text to UTF-16 code units.
         utf16le_bytes = text.encode("utf-16-le", errors="surrogatepass")
         code_units = memoryview(utf16le_bytes).cast("@H")  # Native-endian unsigned short.
         if not _is_well_formed_utf16(code_units):
