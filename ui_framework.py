@@ -208,11 +208,10 @@ def _abort_retry():
     _retry_window = None
 
 def _on_retry_job():
-    global _retry_window
     _update_scope(_retry_window)
 
 def _update_scope(toplevel_window: Window):
-    global _retry_job, _framework
+    global _framework
 
     _framework = _Detector()(toplevel_window)
     #i Shouldn't raise exceptions (see implementation).
@@ -224,7 +223,6 @@ def _update_scope(toplevel_window: Window):
 
 @_mod.scope
 def _ui_framework_scope():
-    global _framework
     return {"ui_framework": str(_framework)}
 
 
