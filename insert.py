@@ -298,39 +298,13 @@ class _InsertSession:
 
     def _wait_for_stable_caret(self):
         self._fill_gui_thread_info()
-
         if not (self._gui_thread_info.flags & win32con.GUI_CARETBLINKING):
             # Change insertion mode. Previous mass event enqueuing may cause problems that may be unavoidable at this point.
             self._must_wait_for_stable_caret = False
             print("WARNING: Couldn't wait for stable caret during text insertion, because Win32 API didn't report one.")
-            #i If this happens even though the app displayed a caret when this code ran, the user must configure the `insert()` override to not wait for caret stabilization.
+            #i If this happens even though the window displayed a caret when this code ran, the user must configure the `insert()` override to not wait for caret stabilization.
             return
 
-        # Try to ensure window reacts quickly enough. (It may not on very high CPU load, e.g.)
-        UNREACTIVE_TIMEOUT_MS = 200
-
-        hwnd = self._gui_thread_info.hwndFocus or self._gui_thread_info.hwndActive
-        if not hwnd:
-            raise RuntimeError("Couldn't determine window.")
-
-        kernel32.SetLastError(winerror.ERROR_SUCCESS)
-        success = user32.SendMessageTimeoutW(
-            hwnd,
-            win32con.WM_NULL,
-            0,
-            0,
-            win32con.SMTO_BLOCK | user32.SMTO_ERRORONEXIT,
-            UNREACTIVE_TIMEOUT_MS,
-            wapi.NULL,
-        )
-        if not success:
-            last_error = kernel32.GetLastError()
-            if last_error == winerror.ERROR_TIMEOUT:
-                raise RuntimeError("Text insertion window was too slow to react.")
-            else:
-                raise ctypes.WinError(last_error)
-
-        # Wait for caret.
         is_first = True
         num_successive_empty_rects = 0
 
