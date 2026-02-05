@@ -1,7 +1,5 @@
 """
 This file makes the `user.ui_framework` Talon scope available that can be used for window matching. See the `UIFramework` enum for possible string values. The assessments are cached in the windows themselves using window properties. Whenever Talon reloads this file, the assessments are reset (without removing the window properties).
-
-The file also prepares some frameworks' windows for text insertion in an indiscernible manner whenever they're activated.
 """
 
 import ctypes
@@ -223,9 +221,6 @@ def _update_scope(toplevel_window: Window):
         print(f"UI framework (window ID {toplevel_window.id:#010x}): {_framework}")
 
     _ui_framework_scope.update()
-
-    _prepare_active_window(_framework)
-    #i Last, because possible exception shouldn't prevent scope update.
 
 @_mod.scope
 def _ui_framework_scope():
@@ -597,31 +592,5 @@ def _get_owner_window(window: Window) -> Optional[Window]:
 
     windows = ui.windows(id=owner_hwnd)  # `NULL` simply yields nothing.
     return windows[0] if windows else None
-
-def _prepare_active_window(framework: UIFramework):
-    if framework == UIFramework.QT:
-        #i When a Qt window is activated, its caret may first not be reported by `GetGUIThreadInfo()` anymore, which would be very useful for the `insert()` override. As it turns out, just briefly pressing the Shift key makes the caret be reported again. When trying to automate this, an attempt to send Shift via `SendInput()` didn't work. With `SendMessage()`, it worked. But sending `VK_NONAME` is even more innocuous and also works. (Tested in output pane of gImageReader v3.4.3.)
-
-        gui_thread_info = wapi.new("GUITHREADINFO *", {"cbSize": wapi.sizeof("GUITHREADINFO")})
-        success = user32.GetGUIThreadInfo(0, gui_thread_info)
-        if not success:
-            raise ctypes.WinError(kernel32.GetLastError())
-
-        hwnd = int(wapi.cast("uintptr_t", gui_thread_info.hwndFocus or gui_thread_info.hwndActive))
-        if not hwnd:
-            raise RuntimeError("Couldn't determine window for preparation after UI framework detection.")
-
-        vk = win32con.VK_NONAME
-        scancode = win32api.MapVirtualKey(vk, user32.MAPVK_VK_TO_VSC_EX)
-        is_extended_scancode = bool(scancode & 0xFF00)
-
-        shared_lparam = (
-            1  # Repeat count.
-            | ((scancode & 0xFF) << 16)
-            | (int(is_extended_scancode) << 24)
-        )
-        win32gui.PostMessage(hwnd, win32con.WM_KEYDOWN, vk, shared_lparam)
-        win32gui.PostMessage(hwnd, win32con.WM_KEYUP, vk, shared_lparam | (1 << 30) | (1 << 31))
-        #i The asynchronous `PostMessage()` instead of the synchronous `SendMessage()` is used, because the calls may take a considerable amount of time (seconds) when an app was just started. Ensuring the window is fully prepared before insertion can even start is desirable, but this function runs inside the `win_focus` event handler, shouldn't delay other handlers, and text insertion while the app window isn't fully loaded yet is improbable.
 
 _script_main()

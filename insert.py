@@ -29,7 +29,7 @@ _mod.setting(
     "stable_caret_ms_until_idle",
     type=float,
     default=0.0,
-    desc="Milliseconds the caret (text input cursor) coordinates must not change until the target window is recognized as ready to receive further input. Not every app reports its carets in a performantly queryable manner. If it doesn't or stops reporting them mid-insertion, `user.char_pause_ms` is used for the rest of the insertion; but this may come too late for certain text. A setting value of 0 expressly turns the feature off.",
+    desc="Milliseconds the caret (text input cursor) coordinates must not change until the target window is recognized as ready to receive further input. Not every app reports its carets in a performantly queryable manner. If it doesn't or stops reporting them mid-insertion, `user.char_pause_ms` is used for the rest of the insertion; but this may come too late for certain text. A setting value of 0 expressly turns the feature off. When the feature is active, every insertion will also be preceded by sending a `VK_NONAME` no-op key press to prime the window for text insertion like it's necessary for Qt apps.",
 )
 # _mod.setting(
 #     "abort_insert_merely_on_app_change",
@@ -76,9 +76,9 @@ class _InsertSession:
     def __init__(self):
         self._start_time = None
 
-        self._key_hold_duration = settings.get("key_hold") / 1000
-        self._char_pause_duration = settings.get("user.char_pause_ms") / 1000
-        self._stable_caret_duration = settings.get("user.stable_caret_ms_until_idle") / 1000
+        self._key_hold_duration = max(0, settings.get("key_hold") / 1000)
+        self._char_pause_duration = max(0, settings.get("user.char_pause_ms") / 1000)
+        self._stable_caret_duration = max(0, settings.get("user.stable_caret_ms_until_idle") / 1000)
         self._must_wait_for_stable_caret = self._stable_caret_duration > 0
         self._abort_on_window_xor_app_change = True #not settings.get("user.abort_insert_merely_on_app_change")
         #i `key_wait` only applies when modifiers are involved, which isn't the case here.
@@ -105,8 +105,8 @@ class _InsertSession:
         if self._gui_thread_info.flags & (win32con.GUI_SYSTEMMENUMODE | win32con.GUI_INMENUMODE | win32con.GUI_POPUPMENUMODE):
             self._menu_active_at_start = True
             if len(text) > 1:
-                raise RuntimeError("Received more than one character to insert while is menu active. Text insertion aborted.")
-        #i See also `flush()`.
+                raise RuntimeError("Received more than one character to insert while menu is active. Text insertion aborted.")
+        #i See also `_flush()`.
 
         # Create event queue.
         if not self._must_wait_for_stable_caret and self._char_pause_duration > 0:
@@ -120,8 +120,11 @@ class _InsertSession:
 
         # Send events.
         self._start_time = time.perf_counter()
-        had_surrogate = False
 
+        if self._must_wait_for_stable_caret:
+            self._prime_target(self._gui_thread_info)
+
+        had_surrogate = False
         for i, code_unit in enumerate(code_units):
             vk = _InsertSession._VKS_BY_SELECT_ASCII_CODES.get(code_unit)  # Never 0.
             is_vk_event = bool(vk)
@@ -164,6 +167,49 @@ class _InsertSession:
         self._flush()
         if must_wait:
             self._wait_for_stable_caret()
+
+    def _prime_target(self, gui_thread_info):
+        """Primes the focused child window or the active top-level window for text insertion."""
+
+        #i When a Qt window is activated, and also under other circumstances, its caret may first not be reported by `GetGUIThreadInfo()`, which is required to wait for caret stabilization. Sending `VK_NONAME` key events to the app and waiting until they have been processed makes the caret be reported again. Pressing this virtual key with `SendInput()` instead doesn't work.
+        #i
+        #i Another problem in Qt apps which this trick also removes is that the first character of the first insertion after app start may simply be left out.
+        #i
+        #i Example spots in Qt apps where this trick matters:
+        #i - In Equalizer APO v1.4.2 Configuration Editor when editing a fresh comment entry
+        #i - Output pane of gImageReader v3.4.3 (not always)
+
+        hwnd = gui_thread_info.hwndFocus or gui_thread_info.hwndActive
+        if not hwnd:
+            raise RuntimeError("Couldn't determine window to prime for text insertion.")
+
+        timeout = 2.0
+        for event in (win32con.WM_KEYDOWN, win32con.WM_KEYUP):
+            wparam = win32con.VK_NONAME
+            lparam = 1  # Repeat count. Scancode is 0.
+            if event == win32con.WM_KEYUP:
+                lparam |= (1 << 30) | (1 << 31)  # Always set.
+
+            start = time.perf_counter()
+
+            kernel32.SetLastError(winerror.ERROR_SUCCESS)
+            success = user32.SendMessageTimeoutW(
+                hwnd,
+                event,
+                wparam,
+                lparam,
+                win32con.SMTO_BLOCK | user32.SMTO_ERRORONEXIT,
+                round(timeout * 1000),
+                wapi.NULL,
+            )
+            if not success:
+                last_error = kernel32.GetLastError()
+                if last_error == winerror.ERROR_TIMEOUT:
+                    raise RuntimeError("Couldn't prime window for text insertion before timeout.")
+                else:
+                    raise ctypes.WinError(last_error)
+            elif event == win32con.WM_KEYDOWN:
+                timeout -= time.perf_counter() - start
 
     def _push_vk_event(self, vk: int, up: bool):
         scancode = win32api.MapVirtualKey(vk, user32.MAPVK_VK_TO_VSC_EX)
@@ -280,7 +326,7 @@ class _InsertSession:
         if not success:
             last_error = kernel32.GetLastError()
             if last_error == winerror.ERROR_TIMEOUT:
-                raise RuntimeError("Text insertion window was to slow to react.")
+                raise RuntimeError("Text insertion window was too slow to react.")
             else:
                 raise ctypes.WinError(last_error)
 
