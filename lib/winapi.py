@@ -19,6 +19,7 @@ wapi.cdef(GENERAL_WAPI_SOURCE)
 
 kernel32 = wapi.dlopen("kernel32.dll")
 wapi.cdef(r"""
+    DWORD WINAPI GetTickCount(VOID);
     DWORD WINAPI K32GetModuleBaseNameW(
         HANDLE hProcess,
         HMODULE hModule,
@@ -36,6 +37,8 @@ wapi.cdef(r"""
     HANDLE WINAPI GetPropW(HWND hWnd, LPCWSTR lpString);
     BOOL WINAPI SetPropW(HWND hWnd, LPCWSTR lpString, HANDLE hData);
     BOOL WINAPI IsWindowVisible(HWND hWnd);
+    BOOL WINAPI PostThreadMessageW(DWORD idThread, UINT Msg, WPARAM wParam, LPARAM lParam);
+    UINT WINAPI RegisterWindowMessageW(LPCWSTR lpString);
 
     // `GetGUIThreadInfo()`.
     typedef struct tagRECT {
@@ -67,6 +70,27 @@ wapi.cdef(r"""
     #define GWLP_ID             -12
 
     LONG_PTR WINAPI GetWindowLongPtrW(HWND hWnd, int nIndex);
+
+    // `PeekMessageW()`, `GetMessageW()`.
+    #define PM_NOREMOVE         0x0000
+    #define WM_QUIT                         0x0012
+
+    typedef struct tagPOINT {
+        LONG  x;
+        LONG  y;
+    } POINT, *PPOINT, *LPPOINT;
+
+    typedef struct tagMSG {
+        HWND        hwnd;
+        UINT        message;
+        WPARAM      wParam;
+        LPARAM      lParam;
+        DWORD       time;
+        POINT       pt;
+    } MSG, *PMSG, *LPMSG;
+
+    BOOL WINAPI PeekMessageW(LPMSG lpMsg, HWND hWnd, UINT wMsgFilterMin, UINT wMsgFilterMax, UINT wRemoveMsg);
+    BOOL WINAPI GetMessageW(LPMSG lpMsg, HWND hWnd, UINT wMsgFilterMin, UINT wMsgFilterMax);
 
     // `SendInput()`.
     typedef struct tagMOUSEINPUT {
@@ -122,4 +146,35 @@ wapi.cdef(r"""
         UINT uTimeout,
         PDWORD_PTR lpdwResult
     );
+
+    // `SetWinEventHook()`, `UnhookWinEvent()`.
+    typedef HANDLE HWINEVENTHOOK;
+
+    typedef VOID (__stdcall BARE_WINEVENTPROC)(
+        HWINEVENTHOOK hWinEventHook,
+        DWORD         event,
+        HWND          hwnd,
+        LONG          idObject,
+        LONG          idChild,
+        DWORD         idEventThread,
+        DWORD         dwmsEventTime
+    );
+    typedef BARE_WINEVENTPROC *WINEVENTPROC;
+
+    #define WINEVENT_OUTOFCONTEXT   0x0000
+    #define WINEVENT_SKIPOWNTHREAD  0x0001
+    #define EVENT_CONSOLE_CARET             0x4001
+    #define EVENT_OBJECT_LOCATIONCHANGE         0x800B
+    #define     OBJID_CARET         -8
+
+    HWINEVENTHOOK WINAPI SetWinEventHook(
+        DWORD eventMin,
+        DWORD eventMax,
+        HMODULE hmodWinEventProc,
+        WINEVENTPROC pfnWinEventProc,
+        DWORD idProcess,
+        DWORD idThread,
+        DWORD dwFlags
+    );
+    BOOL WINAPI UnhookWinEvent(HWINEVENTHOOK hWinEventHook);
 """)

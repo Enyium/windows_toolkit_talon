@@ -1,5 +1,5 @@
 """
-Reimplements Talon's `insert()` function, and provides Talon settings that allow it to be configured.
+Reimplements Talon's `insert()` function and provides Talon settings that allow it to be configured.
 """
 
 import ctypes
@@ -11,11 +11,12 @@ from talon import Context, Module, actions, app, settings, ui
 if app.platform == "windows" or TYPE_CHECKING:
     import win32api
     import win32con
-    import winerror
 
     from .lib.winapi import kernel32, user32, wapi
 else:
     raise NotImplementedError("Unsupported OS.")
+
+from .caret_observer import caret_observer
 
 _mod = Module()
 
@@ -24,16 +25,16 @@ _mod.tag(
     desc="Activates Smart Input's `insert()` override.",
 )
 _mod.setting(
+    "caret_standstill_ms_before_ready",
+    type=float,
+    default=0.0,
+    desc="After sending the events for a chunk of text, incl. the last, these are the number of milliseconds the caret (text input cursor) position must not change until the target window is recognized as ready to receive further input. Note that, because of visual lag, the standstill may appear to be much shorter than it actually is eventwise; the criterion for determination of the value's magnitude is correct input. Not every app reports its carets in a manner currently recognizable by Smart Input (e.g., Windows Terminal in Windows 11 Home 24H2). A value of 0 expressly turns off all waiting for caret standstill.",
+)
+_mod.setting(
     "char_pause_ms",
     type=float,
     default=0.0,
-    desc="Milliseconds to sleep per character directly sent as itself (as opposed to its respective keys). The setting `user.stable_caret_ms_until_idle` may prevent the per-character pauses to apply.",
-)
-_mod.setting(
-    "stable_caret_ms_until_idle",
-    type=float,
-    default=0.0,
-    desc="Milliseconds the caret (text input cursor) coordinates must not change until the target window is recognized as ready to receive further input. Not every app reports its carets in a performantly queryable manner. If it doesn't or stops reporting them mid-insertion, `user.char_pause_ms` is used for the rest of the insertion; but this may come too late for certain text. A setting value of 0 expressly turns the feature off. When the feature is active, every insertion will also be preceded by sending a `VK_NONAME` no-op key press to prime the window for text insertion like it's necessary for Qt apps.",
+    desc="Milliseconds to sleep per character sent as itself, as opposed to its respective keys.",
 )
 # _mod.setting(
 #     "abort_insert_merely_on_app_change",
@@ -41,7 +42,7 @@ _mod.setting(
 #     default=False,
 #     desc="Whether `insert()` should only abort when the active app is changed. Otherwise, it will abort when the active window is changed. This is useful when a suggestion window would otherwise cause abortion.",
 # )
-#i Setting `user.abort_insert_merely_on_app_change` unavailable for now. More information is needed what window activation is actually happening in the rare case that input is aborted by it (experienced in VS Code, but its suggestion overlays aren't Win32 windows, let alone top-level windows).
+#i Setting `user.abort_insert_merely_on_app_change` unavailable for now. More information is needed what window activation is actually happening in the rare case that input is aborted by it (experienced in VS Code and gImageReader, but VS Code's suggestion overlays aren't Win32 windows, let alone top-level windows).
 
 _ctx = Context()
 _ctx.matches = r"""
@@ -49,22 +50,24 @@ tag: user.smart_input_insert_active
 """
 
 _INSERTION_TIMEOUT = 30
-"""Seconds until insertion is aborted."""
+"""Seconds until a single insertion session is aborted."""
 
 
 @_ctx.action_class("main")
 class _MainActions:
     def insert(text: str):
-        """A reimplementation and replacement of Talon's original function that won't cause problems with dead keys, is more resilient against interference, and is often much faster.
+        """A reimplementation and replacement of Talon's original function that won't cause problems with dead keys, is more resilient against interference, and is much faster.
 
-        Characters are sent as themselves, and not as their respective key presses, which are keyboard-layout-dependent. This also comes with independence from the caps lock state. The only real key events simulated are for these keys:
+        Characters are sent as themselves and not as their respective key presses, which are keyboard-layout-dependent. This also comes with independence from the caps lock state, and in some (web) apps, inserting characters is not a working alternative to pressing them using Talon's `key()` function, which Talon's original `insert()` seems to use. So, voice commands must be dedicated to either `key()` or `insert()`.
+
+        The only real key events simulated are for these keys:
 
         - Tab (`\t`, `\N{TAB}`) - As with Talon's `insert()`, you must be careful not to accidentally accept editor suggestions. For most code use cases, only ever inserting `\t` at the start of a line or after other whitespace should suffice. If you work with TSV (tab-separated values) or something like that, you may need to turn off automatically appearing suggestion overlays completely.
         - Enter (`\n`, `\N{NEW LINE}`) - As for Talon's `insert()`, you should turn off accepting suggestions with Enter altogether in every app, because characters triggering these overlays at the end of lines are basically unavoidable. See also Smart Input repository's readme.
         - Esc (`\x1b`, `\N{ESC}`, `\N{ESCAPE}`) - Can dismiss a suggestion overlay to prevent confirming it, but race conditions may cause problems in certain apps. In general, success also depends too much on app settings and IDE state (find box incl. its highlights, etc.).
         - Backspace (`\b`, `\N{BS}`, `\N{BACKSPACE}`) - Finalizing the current word with a space character and deleting it again can dismiss a suggestion overlay, but race conditions may cause problems in certain apps.
 
-        Talon's setting `key_hold` still applies for those keys. Additionally, you can use the settings `user.char_pause_ms`, and `user.stable_caret_ms_until_idle`.
+        Talon's setting `key_hold` still applies for those keys. Additionally, you can use the settings `user.caret_standstill_ms_before_ready`, and `user.char_pause_ms`.
         """
         #, and `user.abort_insert_merely_on_app_change`
 
@@ -73,7 +76,7 @@ class _MainActions:
 
 class _InsertSession:
     _VKS_BY_SELECT_ASCII_CODES = {
-        # Keyboard-layout-invariant virtual-key codes that don't work with the `KEYEVENTF_UNICODE` flag.
+        # Keyboard-layout-invariant virtual-key codes that don't work with `SendInput()`'s `KEYEVENTF_UNICODE` flag.
         0x08: win32con.VK_BACK,
         0x09: win32con.VK_TAB,
         0x0A: win32con.VK_RETURN,
@@ -84,9 +87,8 @@ class _InsertSession:
         self._start_time = None
 
         self._key_hold_duration = max(0, settings.get("key_hold") / 1000)
+        self._caret_standstill_duration = max(0, settings.get("user.caret_standstill_ms_before_ready") / 1000)
         self._char_pause_duration = max(0, settings.get("user.char_pause_ms") / 1000)
-        self._stable_caret_duration = max(0, settings.get("user.stable_caret_ms_until_idle") / 1000)
-        self._must_wait_for_stable_caret = self._stable_caret_duration > 0
         self._abort_on_window_xor_app_change = True #not settings.get("user.abort_insert_merely_on_app_change")
         #i `key_wait` only applies when modifiers are involved, which isn't the case here.
 
@@ -105,9 +107,10 @@ class _InsertSession:
         utf16le_bytes = text.encode("utf-16-le", errors="surrogatepass")
         code_units = memoryview(utf16le_bytes).cast("@H")  # Native-endian unsigned short.
         if not _is_well_formed_utf16(code_units):
+        #i Doing this check in the event-sending loop could lead to unfinished input.
             raise ValueError("Malformed UTF-16.")
 
-        # Limit insertion, if menu active.
+        # Limit insertion if menu active.
         self._fill_gui_thread_info()
         if self._gui_thread_info.flags & (win32con.GUI_SYSTEMMENUMODE | win32con.GUI_INMENUMODE | win32con.GUI_POPUPMENUMODE):
             self._menu_active_at_start = True
@@ -116,107 +119,64 @@ class _InsertSession:
         #i See also `_flush()`.
 
         # Create event queue.
-        if not self._must_wait_for_stable_caret and self._char_pause_duration > 0:
-            # At most last up and next down.
-            capacity = 2
-        else:
-            # Down and up for every code unit.
-            capacity = len(code_units) * 2
+        capacity = len(code_units) * 2  # Down and up for every code unit.
         self._events = wapi.new("INPUT[]", capacity)
         self._num_events = 0
 
-        # Send events.
+        # Send events chunkwise.
         self._start_time = time.perf_counter()
 
-        if self._must_wait_for_stable_caret:
-            self._prime_target(self._gui_thread_info)
+        if self._caret_standstill_duration:
+            caret_observer.observe()
 
-        had_surrogate = False
-        for i, code_unit in enumerate(code_units):
-            vk = _InsertSession._VKS_BY_SELECT_ASCII_CODES.get(code_unit)  # Never 0.
-            is_vk_event = bool(vk)
+        try:
+            had_surrogate = False
+            for code_unit in code_units:
+                vk = _InsertSession._VKS_BY_SELECT_ASCII_CODES.get(code_unit)  # Never 0.
+                is_vk_event = bool(vk)
 
-            is_printable = code_unit >= 0x20 and code_unit != 0x7F
+                is_printable = code_unit >= 0x20 and code_unit != 0x7F
 
-            if not (is_vk_event or is_printable):
-                continue
+                if not (is_vk_event or is_printable):
+                    continue
 
-            is_surrogate = code_unit >= 0xD800 and code_unit <= 0xDFFF
+                is_surrogate = code_unit >= 0xD800 and code_unit <= 0xDFFF
 
-            for up in (False, True):
-                if not up:
-                    #TODO: WITH SUITABLE TEST APP: With regard to suggestion windows, it could be necessary to also wait for caret stabilization before `\N{esc}`, `\t` and `\n` (suggestions are confirmed with Tab and/or Enter, depending on the app and its settings). But a test app would be needed that has suggestion windows, reports its caret, and benefits from caret stabilization. Depending on the settings, these additional pauses could undesirably add to `key_hold` pauses.
-                    if self._must_wait_for_stable_caret and is_surrogate and not had_surrogate:
-                        self._flush()
-                        self._wait_for_stable_caret()
-                        #i In Qt apps, sending non-BMP characters (those consisting of surrogates) *after* BMP characters (<= U+FFFF) without waiting until the caret has stabilized (e.g., by using a single `SendInput()` call) can lead to the non-BMP characters being placed *before* the BMP characters. This is why we start a new chunk at every transition from BMP to non-BMP characters and wait for the caret to stabilize before continuing. (The other transition is unproblematic.)
-                else:
-                    if is_vk_event:
-                        if self._key_hold_duration > 0:
+                for down in (True, False):
+                    if down:
+                        #TODO: WITH SUITABLE TEST APP: With regard to suggestion windows, it could be necessary to also wait for caret standstill before `\N{esc}`, `\t` and `\n` (suggestions are confirmed with Tab and/or Enter, depending on the app and its settings). But a test app would be needed that has suggestion windows, reports its caret, and benefits from waiting for caret standstill. Depending on the settings, these additional pauses could undesirably add to `key_hold` pauses.
+                        if self._caret_standstill_duration and is_surrogate and not had_surrogate:
                             self._flush()
-                            actions.sleep(self._key_hold_duration)
+                            caret_observer.wait_for_standstill(self._caret_standstill_duration, _INSERTION_TIMEOUT)
+                            #i In Qt apps, sending Unicode supplementary characters (those consisting of two surrogates) *after* BMP characters without waiting for caret standstill (e.g., by using a single `SendInput()` call) most often leads to the supplementary characters being placed *before* all or some of the BMP characters. This is why we start a new chunk at every transition from BMP to supplementary characters and wait for caret standstill before continuing. (The other transition is unproblematic.)
                     else:
-                        if not self._must_wait_for_stable_caret and self._char_pause_duration > 0:
-                            self._flush()
-                            actions.sleep(self._char_pause_duration)
+                        if is_vk_event:
+                            if self._key_hold_duration:
+                                self._flush()
+                                actions.sleep(self._key_hold_duration)
+                        else:
+                            if self._char_pause_duration:
+                                self._flush()
+                                actions.sleep(self._char_pause_duration)
 
-                if is_vk_event:
-                    self._push_vk_event(vk, up)
-                else:
-                    self._push_utf16_code_unit_event(code_unit, up)
+                    if is_vk_event:
+                        self._push_vk_event(vk, not down)
+                    else:
+                        self._push_utf16_code_unit_event(code_unit, not down)
 
-            if i % 200 == 0 and time.perf_counter() - self._start_time >= _INSERTION_TIMEOUT:
-                raise RuntimeError("Text insertion took too long.")
+                if time.perf_counter() - self._start_time >= _INSERTION_TIMEOUT:
+                    raise RuntimeError("Text insertion took too long.")
 
-            had_surrogate = is_surrogate
+                had_surrogate = is_surrogate
 
-        must_wait = self._must_wait_for_stable_caret and self._num_events > 1  # More than single up-event.
-        self._flush()
-        if must_wait:
-            self._wait_for_stable_caret()
-
-    def _prime_target(self, gui_thread_info):
-        """Primes the focused child window or the active top-level window for text insertion."""
-
-        #i When a Qt window is activated, and also under other circumstances, its caret may first not be reported by `GetGUIThreadInfo()`, which is required to wait for caret stabilization. Sending `VK_NONAME` key events to the app and waiting until they have been processed makes the caret be reported again. Pressing this virtual key with `SendInput()` instead doesn't work.
-        #i
-        #i Another problem in Qt apps which this trick also removes is that the first character of the first insertion after app start may simply be left out.
-        #i
-        #i Example spots in Qt apps where this trick matters:
-        #i - In Equalizer APO v1.4.2 Configuration Editor when editing a fresh comment entry
-        #i - Output pane of gImageReader v3.4.3 (not always)
-
-        hwnd = gui_thread_info.hwndFocus or gui_thread_info.hwndActive
-        if not hwnd:
-            raise RuntimeError("Couldn't determine window to prime for text insertion.")
-
-        timeout = 2.0
-        for event in (win32con.WM_KEYDOWN, win32con.WM_KEYUP):
-            wparam = win32con.VK_NONAME
-            lparam = 1  # Repeat count. Scancode is 0.
-            if event == win32con.WM_KEYUP:
-                lparam |= (1 << 30) | (1 << 31)  # Always set.
-
-            start = time.perf_counter()
-
-            kernel32.SetLastError(winerror.ERROR_SUCCESS)
-            success = user32.SendMessageTimeoutW(
-                hwnd,
-                event,
-                wparam,
-                lparam,
-                win32con.SMTO_BLOCK | user32.SMTO_ERRORONEXIT,
-                round(timeout * 1000),
-                wapi.NULL,
-            )
-            if not success:
-                last_error = kernel32.GetLastError()
-                if last_error == winerror.ERROR_TIMEOUT:
-                    raise RuntimeError("Couldn't prime window for text insertion before timeout.")
-                else:
-                    raise ctypes.WinError(last_error)
-            elif event == win32con.WM_KEYDOWN:
-                timeout -= time.perf_counter() - start
+            must_wait = self._caret_standstill_duration and self._num_events > 1
+            #i A single event must be an up-event, and waiting for an up-event shouldn't be necessary, because apps generally only insert characters on down-events.
+            self._flush()
+            if must_wait:
+                caret_observer.wait_for_standstill(self._caret_standstill_duration, _INSERTION_TIMEOUT)
+        finally:
+            if self._caret_standstill_duration:
+                caret_observer.stop_observing()
 
     def _push_vk_event(self, vk: int, up: bool):
         scancode = win32api.MapVirtualKey(vk, user32.MAPVK_VK_TO_VSC_EX)
@@ -263,6 +223,7 @@ class _InsertSession:
         if self._num_events <= 0:
             return
 
+        #TODO: Maybe implement `_emergency_keyup()` function and use it in a `finally` block, perhaps in `__call__()`.
         # Check for various obstacles. (Exceptions could theoretically lead to key-down without key-up event. Severity yet unknown.)
         if self._abort_on_window_xor_app_change:
             active_window = ui.active_window()
@@ -295,65 +256,13 @@ class _InsertSession:
         num_events_sent = user32.SendInput(
             self._num_events, self._events, wapi.sizeof("INPUT")
         )
-        if num_events_sent == 0:
+        if not num_events_sent:
             raise ctypes.WinError(kernel32.GetLastError())
         if num_events_sent != self._num_events:
-            raise RuntimeError("Failed to send all keyboard input requests.")
+            raise RuntimeError("Could only send some, but not all keyboard events.")
 
         # Reset event queue with regard to next flush.
         self._num_events = 0
-
-    def _wait_for_stable_caret(self):
-        self._fill_gui_thread_info()
-        if not (self._gui_thread_info.flags & win32con.GUI_CARETBLINKING):
-            # Change insertion mode. Previous mass event enqueuing may cause problems that may be unavoidable at this point.
-            self._must_wait_for_stable_caret = False
-            print("WARNING: Couldn't wait for stable caret during text insertion, because Win32 API didn't report one.")
-            #i If this happens even though the window displayed a caret when this code ran, the user must configure the `insert()` override to not wait for caret stabilization.
-            return
-
-        is_first = True
-        num_successive_empty_rects = 0
-
-        last_rect = wapi.new("RECT *")
-        last_rect_fields = memoryview(wapi.buffer(
-            last_rect, wapi.sizeof("RECT")
-        )).cast("l")
-        rect_fields = memoryview(wapi.buffer(
-            wapi.addressof(self._gui_thread_info, "rcCaret"), wapi.sizeof("RECT")
-        )).cast("l")
-        #i The `GetGUIThreadInfo()` docs' remarks talk about strange encoding of special values in `rcCaret`. But since we just wait for the values to stabilize, we assume that this doesn't matter.
-
-        last_move_time = time.perf_counter()
-
-        while True:
-            self._fill_gui_thread_info()
-
-            if not any(rect_fields):
-                # Tolerate only a couple of empty rects in succession that sporadically may be returned.
-                num_successive_empty_rects += 1
-                if num_successive_empty_rects >= 10:
-                    # Give up and change insertion mode.
-                    self._must_wait_for_stable_caret = False
-                    print("WARNING: Waiting for stable caret during text insertion aborted because of too many missing caret position data points.")
-                    break
-            elif not is_first:
-                num_successive_empty_rects = 0
-                now = time.perf_counter()
-
-                if rect_fields != last_rect_fields:
-                    # Reset.
-                    last_move_time = now
-                elif now - last_move_time >= self._stable_caret_duration:
-                    # Assume caret as stable.
-                    break
-
-                if now - self._start_time >= _INSERTION_TIMEOUT:
-                    raise RuntimeError("Text insertion took too long while waiting for caret to stop moving.")
-
-            actions.sleep(0.010)  # Throttle.
-            last_rect_fields[:] = rect_fields
-            is_first = False
 
     def _fill_gui_thread_info(self):
         success = user32.GetGUIThreadInfo(0, self._gui_thread_info)

@@ -589,6 +589,6 @@ def _get_owner_window(window: Window) -> Optional[Window]:
             raise
 
     windows = ui.windows(id=owner_hwnd)  # `NULL` simply yields nothing.
-    return windows[0] if windows else None
+    return windows[0] if windows else None  # Max. 1 item possible.
 
 _script_main()
