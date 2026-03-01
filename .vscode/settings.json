@@ -1,7 +1,7 @@
 {
     "editor.wordWrap": "on",
 
-    "python.defaultInterpreterPath": "~\\AppData\\Roaming\\talon\\venv\\3.11\\Scripts\\python.exe",
+    "python.defaultInterpreterPath": "${env:APPDATA}\\talon\\venv\\3.11\\Scripts\\python.exe",
     "python.analysis.diagnosticSeverityOverrides": {
         "reportMissingModuleSource": "none",
     },
