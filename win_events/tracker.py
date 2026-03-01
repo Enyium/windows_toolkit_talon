@@ -6,7 +6,6 @@ import time
 from types import TracebackType
 from typing import Literal, Optional, Self, Sequence, TYPE_CHECKING, Union
 from uuid import UUID
-from weakref import WeakMethod
 
 from talon import app
 
@@ -142,7 +141,7 @@ class WinEventTracker:
                 event_or_slice,
                 self.__process_id,
                 self.__thread_id,
-                weak_on_winevent=WeakMethod(self.__on_winevent),
+                on_winevent=self.__on_winevent,
             )
             self.__subscription_handles.append(subscription_handle)
 

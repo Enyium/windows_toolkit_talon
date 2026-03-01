@@ -5,16 +5,16 @@ from threading import Event, Lock, RLock
 import traceback
 from typing import Optional, Protocol, TYPE_CHECKING, Union
 from uuid import UUID
-from weakref import WeakMethod
 
 from talon import app
 
-from ..lib.message_loop import MessageLoopExecutor
+from ..lib.weak import WeakCallback, to_weak_callback
 from .constants import WinEvent
 
 if app.platform == "windows" or TYPE_CHECKING:
     import win32con
 
+    from ..lib.message_loop import MessageLoopExecutor
     from ..lib.winapi import CType, user32, wapi
 else:
     raise NotImplementedError("Unsupported OS.")
@@ -24,7 +24,8 @@ class WinEventListener:
     """Lets you subscribe to win events to receive them in a separate thread."""
 
     class OnWinEventCallback(Protocol):
-        def __call__(event: int, hwnd: CType, object_id: int, child_id: int, thread_id: int, time_ms: int) -> None:
+        def __call__(self, event: int, hwnd: CType, object_id: int, child_id: int, thread_id: int, time_ms: int) -> None:
+        #i `self` just belongs to `Protocol`.
             """See docs for the `WINEVENTPROC` WinAPI callback.
 
             `time_ms` is compatible with the `GetTickCount()` WinAPI function. Both wrap around to zero after `0xFFFF_FFFF`. The granularity of these values is relatively coarse.
@@ -35,11 +36,11 @@ class WinEventListener:
         self.__label = f'`{WinEventListener.__name__}` with UUID "{instance_uuid4}"'
         self.__lock = RLock()
         self.__is_shut_down_event = Event()
-        self.__weak_callbacks_by_hook_handles: dict[CType, WeakMethod[WinEventListener.OnWinEventCallback]] = {}
+        self.__weak_callbacks_by_hook_handles: dict[CType, WeakCallback[WinEventListener.OnWinEventCallback]] = {}
 
         self.__executor = MessageLoopExecutor(
             instance_uuid4,
-            weak_on_thread_created=WeakMethod(self.__on_thread_created),
+            on_thread_created=self.__on_thread_created,
             on_thread_exit=functools.partial(
                 WinEventListener.__on_thread_exit,
                 self.__lock,
@@ -63,19 +64,19 @@ class WinEventListener:
         process_id: Optional[int] = None,
         thread_id: Optional[int] = None,
         *,
-        weak_on_winevent: WeakMethod[OnWinEventCallback],
+        on_winevent: OnWinEventCallback,
     ) -> int:
         """Starts calling the callback whenever the win event or one from the inclusive range of win events occurred.
 
         - If `process_id` or `thread_id` is `None`, the respective filter is disabled.
-        - `weak_on_winevent()` is called in a separate thread. Calling certain WinAPI functions may cause reentrancy; see <https://learn.microsoft.com/en-us/windows/win32/winauto/guarding-against-reentrancy-in-hook-functions>.
+        - `on_winevent()` is called in a separate thread. Calling certain WinAPI functions may cause reentrancy; see <https://learn.microsoft.com/en-us/windows/win32/winauto/guarding-against-reentrancy-in-hook-functions>.
 
         Returns a subscription handle that you need to unsubscribe.
 
         See also docs for the `SetWinEventHook()` WinAPI function.
         """
 
-        hook_handle = self.__executor.invoke(self.__set_hook, events, process_id, thread_id, weak_on_winevent, timeout=2)
+        hook_handle = self.__executor.invoke(self.__set_hook, events, process_id, thread_id, on_winevent, timeout=2)
         return int(wapi.cast("uintptr_t", hook_handle))
 
     def __set_hook(
@@ -83,7 +84,7 @@ class WinEventListener:
         events: Union[WinEvent, slice],
         process_id: Optional[int],
         thread_id: Optional[int],
-        weak_on_winevent: WeakMethod[OnWinEventCallback],
+        on_winevent: OnWinEventCallback,
     ) -> CType:
         with self.__lock:
             if self.__is_shut_down_event.is_set():
@@ -107,7 +108,7 @@ class WinEventListener:
             if not hook_handle:
                 raise RuntimeError(f"{self.__label} failed to hook into win events `{first_event}` through `{last_event}`.")
 
-            self.__weak_callbacks_by_hook_handles[hook_handle] = weak_on_winevent
+            self.__weak_callbacks_by_hook_handles[hook_handle] = to_weak_callback(on_winevent)
             return hook_handle
 
     def _verify_event_slice(event_range: slice):
@@ -210,7 +211,7 @@ class WinEventListener:
     def __on_thread_exit(
         lock: Lock,
         is_shut_down_event: Event,
-        weak_callbacks_by_hook_handles: dict[CType, WeakMethod[OnWinEventCallback]],
+        weak_callbacks_by_hook_handles: dict[CType, WeakCallback[OnWinEventCallback]],
     ) -> None:
         with lock:
             if is_shut_down_event.is_set():

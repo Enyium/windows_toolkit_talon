@@ -12,12 +12,12 @@ import traceback
 from typing import Callable, Optional, ParamSpec, Self, TYPE_CHECKING, TypeAlias, TypeVar
 from uuid import UUID
 import weakref
-from weakref import ReferenceType, WeakMethod
+from weakref import ReferenceType
 
 from talon import app
 
 from ..pymod_termination.index import get_pymod_termination_hook
-from .weak import call_weak
+from .weak import call_weak, to_weak_callback
 
 T = TypeVar("T")
 P = ParamSpec("P")
@@ -44,23 +44,23 @@ class MessageLoop:
         self,
         instance_uuid4: str,
         *,
-        weak_on_thread_created: Optional[WeakMethod[Callable[[], None]]] = None,
-        weak_on_unique_message: Optional[WeakMethod[Callable[[int, int], None]]] = None,
+        on_thread_created: Optional[Callable[[], None]] = None,
+        on_unique_message: Optional[Callable[[int, int], None]] = None,
         on_thread_exit: Optional[Callable[[], None]] = None,
     ) -> None:
         """
-        - When you return from `weak_on_thread_created()`, the constructor will still not have returned.
+        - When you return from `on_thread_created()`, the constructor will still not have returned.
         - The callbacks are called in the separate thread.
-        - `weak_on_unique_message()` receives the arguments posted with `post_unique()`.
-        - The instance takes care of causing `on_thread_exit()` on module and instance finalization. You must use `functools.partial()` for it and must not directly or indirectly bind it to your instance that holds this `MessageLoop` instance to avoid a reference cycle that hinders garbage collection and keeps the separate thread alive when missing a call to `quit()`. Think of it as similar to `weakref.finalize()`. The callback reference is released after thread exit.
+        - `on_unique_message()` receives the arguments posted with `post_unique()`.
+        - The instance takes care of calling `on_thread_exit()` on module and instance finalization. You must use `functools.partial()` for it and must not directly or indirectly bind it to your instance that holds this `MessageLoop` instance to avoid a reference cycle that hinders garbage collection and keeps the separate thread alive when missing a call to `quit()`. Think of it as similar to `weakref.finalize()`. The callback reference is released after thread exit.
         - The UUIDv4 is used in messages.
         """
 
         # Pre-thread preparation.
         self.__label = f'`{MessageLoop.__name__}` with UUID "{instance_uuid4}"'
 
-        self.__weak_downstream_on_thread_created = weak_on_thread_created
-        self.__weak_downstream_on_unique_message = weak_on_unique_message
+        self.__weak_downstream_on_thread_created = to_weak_callback(on_thread_created) if on_thread_created is not None else None
+        self.__weak_downstream_on_unique_message = to_weak_callback(on_unique_message) if on_unique_message is not None else None
         if not isinstance(on_thread_exit, functools.partial):
             raise TypeError("Expected type `functools.partial` for `on_thread_exit`.")
         self.__downstream_on_thread_exit = on_thread_exit
@@ -163,7 +163,7 @@ class MessageLoop:
             del self
 
     def post_unique(self, arg_1: int = 0, arg_2: int = 0) -> None:
-        """Posts a unique message with the specified arguments to the message queue of the separate thread, after which your `weak_on_unique_message()` callback will be called.
+        """Posts a unique message with the specified arguments to the message queue of the separate thread, after which your `on_unique_message()` callback will be called.
 
         The first argument can be an unsigned and the second argument a signed pointer-sized value. Values out of range raise an `OverflowError`.
         """
@@ -239,7 +239,7 @@ class MessageLoopExecutor(Executor):
         self,
         instance_uuid4: UUID,
         *,
-        weak_on_thread_created: Optional[WeakMethod[Callable[[], None]]] = None,
+        on_thread_created: Optional[Callable[[], None]] = None,
         on_thread_exit: Optional[OnThreadExitCallback] = None,
     ) -> None:
         """See `MessageLoop` for information about the arguments."""
@@ -255,8 +255,8 @@ class MessageLoopExecutor(Executor):
 
         self.__message_loop = MessageLoop(
             instance_uuid4,
-            weak_on_thread_created=weak_on_thread_created,
-            weak_on_unique_message=WeakMethod(self.__on_unique_message),
+            on_thread_created=on_thread_created,
+            on_unique_message=self.__on_unique_message,
             on_thread_exit=functools.partial(
                 MessageLoopExecutor.__on_thread_exit,
                 on_thread_exit,

@@ -18,9 +18,10 @@ import textwrap
 from threading import Lock, RLock
 import traceback
 from types import ModuleType, NoneType, TracebackType
-from typing import Any, Callable, Literal, Optional, ParamSpec, Self, TypeAlias, TypeVar, Union
+from typing import Any, Callable, Literal, Optional, ParamSpec, Self, TypeAlias, TypeVar
 import weakref
-from weakref import ReferenceType, WeakMethod
+
+from ..lib.weak import WeakCallback, to_weak_callback
 
 T = TypeVar("T")
 P = ParamSpec("P")
@@ -79,10 +80,7 @@ class _ModuleKey:
 
 
 class TerminationHook:
-    __WeakCallbackQueue: TypeAlias = deque[Union[
-        ReferenceType[Callable[[], None]],
-        WeakMethod[Callable[[], None]],
-    ]]
+    __WeakCallbackQueue: TypeAlias = deque[WeakCallback[Callable[[], None]]]
 
     class _Command(Enum):
         FINALIZE_MODULE_OBJECT = auto()
@@ -157,12 +155,7 @@ class TerminationHook:
 
             del weak_callbacks[write_index:]
 
-        try:
-            weak_callback = WeakMethod(callback)
-        except TypeError:
-            weak_callback = weakref.ref(callback)
-
-        weak_callbacks.append(weak_callback)
+        weak_callbacks.append(to_weak_callback(callback))
 
     @property
     def globals_teardown_deferrer(self) -> TeardownDeferrer:
