@@ -158,7 +158,7 @@ _WINRT_XAML_CHILD_CLASSES = frozenset((
 _gtk_dll_regex = re.compile(r"^libgtk-[\d.-]+\.dll$")
 
 _FRAMEWORK_INT_PROP_NAME = w("Talon.SmartInput.UIFramework")
-_ASSESSMENT_TIME_NS_PROP_NAME = w("Talon.SmartInput.UIFrameworkAssessmentTimeNS")
+_ASSESSMENT_TIME_NS_PROP_NAME = w("Talon.SmartInput.UIFramework.AssessmentTimeNS")
 
 _framework = UIFramework.PENDING
 """Last assessment for communication with Talon scope."""
@@ -173,7 +173,9 @@ def _script_main():
     ui.register("win_focus", _on_win_focus)
 
 def _on_ready():
-    _update_scope(ui.active_window())
+    toplevel_window = ui.active_window()
+    if toplevel_window.id != -1:  # Guard against Talon launch.
+        _update_scope(toplevel_window)
 
 def _on_win_focus(toplevel_window: Window):
     _abort_retry()
@@ -268,7 +270,7 @@ class _Detector:
 
             # Cache assessment inside window itself.
             if _MUST_CACHE_ASSESSMENT and framework != UIFramework.PENDING:
-                for (prop_name, value) in (
+                for prop_name, value in (
                     (_FRAMEWORK_INT_PROP_NAME, int(framework)),
                     (_ASSESSMENT_TIME_NS_PROP_NAME, time.perf_counter_ns()),  # Dependent on 64-bit process.
                     #i Setting the UI framework first is important. If we'd set the assessment time first and then setting the UI framework failed, we would have presented the old UI framework value as valid in the current context.
@@ -276,7 +278,7 @@ class _Detector:
                     success = user32.SetPropW(
                         wapi.cast("HWND", toplevel_window.id),
                         prop_name,
-                        wapi.cast("HANDLE", value)
+                        wapi.cast("HANDLE", value),
                     )
                     if not success:
                         last_error = kernel32.GetLastError()
@@ -371,7 +373,7 @@ class _Detector:
                     framework = self._check_child_window_tree(toplevel_window)
 
                 case ExtraSource.MODULE_FILENAMES:
-                    (framework, is_std_dialog) = self._check_module_filenames(
+                    framework, is_std_dialog = self._check_module_filenames(
                         toplevel_window,
                         expected_module_based_frameworks,
                         wants_dialog_check=is_dialog,
