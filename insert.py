@@ -2,6 +2,7 @@
 Reimplements Talon's `insert()` function and provides Talon settings that allow it to be configured.
 """
 
+from contextlib import nullcontext
 import ctypes
 import time
 from typing import TYPE_CHECKING
@@ -16,7 +17,8 @@ if app.platform == "windows" or TYPE_CHECKING:
 else:
     raise NotImplementedError("Unsupported OS.")
 
-from .caret_observer import caret_observer
+from .win_events.tracker import WinEventTracker
+from .win_events.constants import WinEvent, ObjectID
 
 _mod = Module()
 
@@ -96,7 +98,7 @@ class _InsertSession:
         self._num_events = 0
 
         active_window = ui.active_window()
-        self._insertion_hwnd = active_window.id
+        self._insertion_toplevel_hwnd = active_window.id
         self._insertion_pid = active_window.app.pid
 
         self._gui_thread_info = wapi.new("GUITHREADINFO *", {"cbSize": wapi.sizeof("GUITHREADINFO")})
@@ -126,10 +128,19 @@ class _InsertSession:
         # Send events chunkwise.
         self._start_time = time.perf_counter()
 
-        if self._caret_standstill_duration:
-            caret_observer.observe()
-
-        try:
+        with (
+            WinEventTracker(
+                WinEvent.OBJECT_LOCATIONCHANGE,
+                #i In Windows Terminal, both `OBJECT_LOCATIONCHANGE` and `CONSOLE_CARET` didn't work. In `conhost.exe`, they did. (Windows 11 Home 24H2)
+                object_id=ObjectID.CARET,
+                inclusive_ancestor_hwnd=self._insertion_toplevel_hwnd,
+                timeout=_INSERTION_TIMEOUT,
+            )
+            if self._caret_standstill_duration
+            else nullcontext()
+            as caret_tracker
+            #i Note that apps' UIs and their signaling of win events may not be in sync. E.g., in VS Code v1.109.5, the sent text may already be presented while `OBJECT_LOCATIONCHANGE` events continue to arrive for a moment, making caret waits appear longer. In Notepad of Windows 11 Home 25H2, the arrival of win events may already have ceased while text still continues to appear, visually smoothing out caret waits that were actually longer than they appeared to be. (Printing on win event reception is better than using AccEvent to understand this effect.)
+        ):
             had_surrogate = False
             for code_unit in code_units:
                 vk = _InsertSession._VKS_BY_SELECT_ASCII_CODES.get(code_unit)  # Never 0.
@@ -145,9 +156,9 @@ class _InsertSession:
                 for down in (True, False):
                     if down:
                         #TODO: WITH SUITABLE TEST APP: With regard to suggestion windows, it could be necessary to also wait for caret standstill before `\N{esc}`, `\t` and `\n` (suggestions are confirmed with Tab and/or Enter, depending on the app and its settings). But a test app would be needed that has suggestion windows, reports its caret, and benefits from waiting for caret standstill. Depending on the settings, these additional pauses could undesirably add to `key_hold` pauses.
-                        if self._caret_standstill_duration and is_surrogate and not had_surrogate:
+                        if caret_tracker and is_surrogate and not had_surrogate:
                             self._flush()
-                            caret_observer.wait_for_standstill(self._caret_standstill_duration, _INSERTION_TIMEOUT)
+                            caret_tracker.require_silence(self._caret_standstill_duration)
                             #i In Qt apps, sending Unicode supplementary characters (those consisting of two surrogates) *after* BMP characters without waiting for caret standstill (e.g., by using a single `SendInput()` call) most often leads to the supplementary characters being placed *before* all or some of the BMP characters. This is why we start a new chunk at every transition from BMP to supplementary characters and wait for caret standstill before continuing. (The other transition is unproblematic.)
                     else:
                         if is_vk_event:
@@ -173,10 +184,7 @@ class _InsertSession:
             #i A single event must be an up-event, and waiting for an up-event shouldn't be necessary, because apps generally only insert characters on down-events.
             self._flush()
             if must_wait:
-                caret_observer.wait_for_standstill(self._caret_standstill_duration, _INSERTION_TIMEOUT)
-        finally:
-            if self._caret_standstill_duration:
-                caret_observer.stop_observing()
+                caret_tracker.require_silence(self._caret_standstill_duration)
 
     def _push_vk_event(self, vk: int, up: bool):
         scancode = win32api.MapVirtualKey(vk, user32.MAPVK_VK_TO_VSC_EX)
@@ -223,11 +231,12 @@ class _InsertSession:
         if self._num_events <= 0:
             return
 
-        #TODO: Maybe implement `_emergency_keyup()` function and use it in a `finally` block, perhaps in `__call__()`.
+        #TODO: Maybe implement `_emergency_keyup()` function and use it in a `finally` block, perhaps in `__call__()`. (Continue with regular `insert()` action, so user stays able to insert text.)
+        #TODO: Use `WinEventTracker.had()` to check whether the menu was focused (or focus in general was changed) since the last `SendInput()` call.
         # Check for various obstacles. (Exceptions could theoretically lead to key-down without key-up event. Severity yet unknown.)
         if self._abort_on_window_xor_app_change:
             active_window = ui.active_window()
-            if active_window.id != self._insertion_hwnd:
+            if active_window.id != self._insertion_toplevel_hwnd:
                 raise RuntimeError(f"Active window changed during text insertion. Insertion aborted. Displacing window and app: `{active_window}` (ID {hex(active_window.id)}).")
         else:
             active_window = ui.active_window()

@@ -1,0 +1,370 @@
+"""
+Classes to get a Win32 message loop.
+"""
+
+from collections import deque
+from concurrent.futures import BrokenExecutor, Executor, Future, InvalidStateError
+import ctypes
+import functools
+import textwrap
+from threading import Event, Lock, Thread
+import traceback
+from typing import Callable, Optional, ParamSpec, Self, TYPE_CHECKING, TypeAlias, TypeVar
+from uuid import UUID
+import weakref
+from weakref import ReferenceType, WeakMethod
+
+from talon import app
+
+from ..pymod_termination.index import get_pymod_termination_hook
+from .weak import call_weak
+
+T = TypeVar("T")
+P = ParamSpec("P")
+
+if app.platform == "windows" or TYPE_CHECKING:
+    import winerror
+
+    from .winapi import kernel32, user32, wapi
+else:
+    raise NotImplementedError("Unsupported OS.")
+
+_pymod_termination_hook = get_pymod_termination_hook()
+
+
+class MessageLoop:
+    """Maintains a separate thread with a Win32 message loop.
+    
+    You can post messages in its queue and will receive them again in a callback running in the separate thread. The message loop also handles messages like those registered with Win32 hook functions by calling your callbacks specified there.
+
+    This class is thread-safe.
+    """
+
+    def __init__(
+        self,
+        instance_uuid4: str,
+        *,
+        weak_on_thread_created: Optional[WeakMethod[Callable[[], None]]] = None,
+        weak_on_unique_message: Optional[WeakMethod[Callable[[int, int], None]]] = None,
+        on_thread_exit: Optional[Callable[[], None]] = None,
+    ) -> None:
+        """
+        - When you return from `weak_on_thread_created()`, the constructor will still not have returned.
+        - The callbacks are called in the separate thread.
+        - `weak_on_unique_message()` receives the arguments posted with `post_unique()`.
+        - The instance takes care of causing `on_thread_exit()` on module and instance finalization. You must use `functools.partial()` for it and must not directly or indirectly bind it to your instance that holds this `MessageLoop` instance to avoid a reference cycle that hinders garbage collection and keeps the separate thread alive when missing a call to `quit()`. Think of it as similar to `weakref.finalize()`. The callback reference is released after thread exit.
+        - The UUIDv4 is used in messages.
+        """
+
+        # Pre-thread preparation.
+        self.__label = f'`{MessageLoop.__name__}` with UUID "{instance_uuid4}"'
+
+        self.__weak_downstream_on_thread_created = weak_on_thread_created
+        self.__weak_downstream_on_unique_message = weak_on_unique_message
+        if not isinstance(on_thread_exit, functools.partial):
+            raise TypeError("Expected type `functools.partial` for `on_thread_exit`.")
+        self.__downstream_on_thread_exit = on_thread_exit
+
+        self.__lock = Lock()
+
+        self.__unique_message_id = user32.RegisterWindowMessageW("Talon.SmartInput.MessageLoop.{4dbac389-d878-44b1-b358-17fa6cc04375}")
+        if not self.__unique_message_id:
+            raise ctypes.WinError(kernel32.GetLastError())
+        #i Combined with thread ID. Not `WM_USER+x`/`WM_APP+x`, because we don't know what Talon or user code might post to threads.
+
+        self.__thread_ready = Event()
+        self.__must_quit_asap_event = Event()
+
+        # Start thread.
+        self.__thread = Thread(
+            target=MessageLoop.__thread_main,
+            args=(weakref.ref(self),),
+            #i A weak reference avoids a reference cycle, making garbage collection apart from module finalization possible.
+            name=f"MessageLoop-{instance_uuid4}",
+            daemon=True,
+            #i The `daemon` flag will have to suffice to quit the thread when terminating Talon, since Talon v0.4.0 doesn't seem to provide a working event for that case.
+        )
+        self.__thread.start()
+
+        _pymod_termination_hook.on_module_finalize(self.__on_pymod_finalize)
+        self.__thread_finalizer = weakref.finalize(self, MessageLoop.__finalize_thread, self.__thread.native_id, self.__must_quit_asap_event, asap=True)
+
+        # Ensure initialization in thread is done before allowing to work with the instance.
+        timed_out = not self.__thread_ready.wait(timeout=3)
+        if timed_out:
+            raise RuntimeError(f"Thread of {self.__label} didn't become ready before timeout.")
+
+    @staticmethod
+    def __thread_main(weak_self: ReferenceType[Self]) -> None:
+        # Initialize.
+        self = weak_self()
+        assert type(self) is MessageLoop
+
+        msg = wapi.new("MSG *")
+        user32.PeekMessageW(msg, wapi.NULL, 0, 0, user32.PM_NOREMOVE)
+        #i "The functions that are guaranteed to create a message queue are `Peek­Message`, `Get­Message`, and `Create­Window`." (<https://devblogs.microsoft.com/oldnewthing/20241009-00/?p=110354>) But `GetMessageW()` blocks.
+
+        call_weak(self.__weak_downstream_on_thread_created)
+
+        # # Keep available, even if `self` disappears. (The contructor forbade it to be a bound method.)
+        downstream_on_thread_exit = self.__downstream_on_thread_exit
+
+        #
+        with _pymod_termination_hook.globals_teardown_deferrer:
+            # Cause constructor to return.
+            self.__thread_ready.set()
+            del self
+
+            # Run loop.
+            def print_exception(self):
+                print(
+                    f"ERROR: Unhandled exception in thread of {self.__label}:\n"
+                    + textwrap.indent(traceback.format_exc().rstrip(), "  ")
+                )
+
+            while True:
+                result = user32.GetMessageW(msg, wapi.NULL, 0, 0)
+                if result == -1:
+                    raise ctypes.WinError(kernel32.GetLastError())
+                #i `GetMessageW()` internally calls registered callbacks like those from hooks.
+
+                self: MessageLoop = weak_self()
+                if not self or self.__must_quit_asap_event.is_set():
+                    break
+
+                try:
+                    if not msg.hwnd:  # Thread message.
+                        match msg.message:
+                            case self.__unique_message_id:
+                                call_weak(self.__weak_downstream_on_unique_message, msg.wParam, msg.lParam)
+                            case user32.WM_QUIT:
+                                break
+                except BaseException:
+                    print_exception(self)
+
+                del self
+
+            # Run exit callback.
+            self: MessageLoop = weak_self()
+
+            try:
+                if downstream_on_thread_exit:
+                    downstream_on_thread_exit()
+            except BaseException:
+                if self:
+                    print_exception(self)
+                else:
+                    raise
+            finally:
+                if self:
+                    # Release any referenced objects.
+                    self.__downstream_on_thread_exit = None
+
+            del self
+
+    def post_unique(self, arg_1: int = 0, arg_2: int = 0) -> None:
+        """Posts a unique message with the specified arguments to the message queue of the separate thread, after which your `weak_on_unique_message()` callback will be called.
+
+        The first argument can be an unsigned and the second argument a signed pointer-sized value. Values out of range raise an `OverflowError`.
+        """
+
+        with self.__lock:
+            if not self.__thread:
+                raise RuntimeError(f"{self.__label} already quit.")
+
+            success = user32.PostThreadMessageW(
+                self.__thread.native_id,
+                self.__unique_message_id,
+                arg_1,
+                arg_2,
+                #i CFFI may raise `OverflowError` for `WPARAM` or `LPARAM`.
+            )
+            if not success:
+                raise ctypes.WinError(kernel32.GetLastError())
+
+    def quit(self, wait: bool = True, asap: bool = False) -> None:
+    #i Modeled after `Executor.shutdown()`.
+        """Quits the separate thread with the actual message loop, so that other methods raise an exception when called.
+
+        If `wait` is `True`, the method only returns after the message loop thread exited.
+
+        `asap` specifies whether the message loop should quit as soon as possible, i.e., immediately after fetching the next message without processing it, meaning all pending queue entries will be ignored.
+        """
+
+        with self.__lock:
+            if not self.__thread:
+                return None
+
+            MessageLoop.__finalize_thread(self.__thread.native_id, self.__must_quit_asap_event, asap)
+            self.__thread_finalizer.detach()
+            #i Since the finalizer acts after garbage collection of `self` and this method references `self`, there's no race condition with the finalizer.
+
+            thread = self.__thread
+            self.__thread = None  # Signal to other methods.
+
+        if wait:
+            thread.join()
+
+    def __on_pymod_finalize(self):
+        self.quit(wait=False, asap=True)
+
+    @staticmethod
+    def __finalize_thread(native_id: int, asap_event: Event, asap: bool) -> None:
+        if asap:
+            asap_event.set()
+
+        success = user32.PostThreadMessageW(native_id, user32.WM_QUIT, 0, 0)
+        if not success:
+            last_error = kernel32.GetLastError()
+            if last_error == winerror.ERROR_INVALID_THREAD_ID:  # Already terminated.
+                pass
+            else:
+                raise ctypes.WinError(last_error)
+
+
+class MessageLoopExecutor(Executor):
+    """Executes calls in a separate thread with a Win32 message loop.
+
+    Callbacks registered with `concurrent.futures.Future.add_done_callback()` may run in the separate message loop thread or in any of those that you called this class's API from.
+
+    When a reload resilience mechanism couldn't retrieve your instance for you to shut it down gracefully, indefinitely waiting for one of the produced `Future`s blocks Talon until the instance is garbage-collected.
+
+    This class is thread-safe.
+    """
+
+    OnThreadExitCallback: TypeAlias = Callable[[], None]
+    __PendingJobsDeque: TypeAlias = deque[tuple[Callable[[], object], Future[object]]]
+
+    def __init__(
+        self,
+        instance_uuid4: UUID,
+        *,
+        weak_on_thread_created: Optional[WeakMethod[Callable[[], None]]] = None,
+        on_thread_exit: Optional[OnThreadExitCallback] = None,
+    ) -> None:
+        """See `MessageLoop` for information about the arguments."""
+
+        self.__label = f'`{MessageLoopExecutor.__name__}` with UUID "{instance_uuid4}"'
+        self.__lock = Lock()
+        self.__pending_jobs: MessageLoopExecutor.__PendingJobsDeque = deque()
+        """FIFO queue."""
+
+        self.__is_shut_down_event = Event()
+        if not isinstance(on_thread_exit, functools.partial):
+            raise TypeError("Expected type `functools.partial` for `on_thread_exit`.")
+
+        self.__message_loop = MessageLoop(
+            instance_uuid4,
+            weak_on_thread_created=weak_on_thread_created,
+            weak_on_unique_message=WeakMethod(self.__on_unique_message),
+            on_thread_exit=functools.partial(
+                MessageLoopExecutor.__on_thread_exit,
+                on_thread_exit,
+                self.__lock,
+                self.__is_shut_down_event,
+                self.__pending_jobs,
+                self.__label,
+            ),
+        )
+        #i `MessageLoop` takes care of calling the thread-exit callback on finalization.
+
+    def submit(
+        self,
+        func: Callable[P, T],
+        /,
+        *args: P.args,
+        **kwargs: P.kwargs,
+    ) -> Future[T]:
+        with self.__lock:
+            if self.__is_shut_down_event.is_set():
+                raise RuntimeError(f"{self.__label} already shut down.")
+
+            future = Future()
+            self.__pending_jobs.append((functools.partial(func, *args, **kwargs), future))
+
+            try:
+                self.__message_loop.post_unique()
+            except BaseException:
+                # Rollback.
+                self.__pending_jobs.pop()
+                raise
+
+        return future
+
+    def invoke(
+        self,
+        func: Callable[P, T],
+        /,
+        *args: P.args,
+        timeout: Optional[float] = None,
+        **kwargs: P.kwargs,
+    ) -> T:
+        """Convenience function that synchronously calls a function in the message loop thread by calling `submit()` and waiting for the `Future` to complete."""
+
+        return self.submit(func, *args, **kwargs).result(timeout)
+
+    def __on_unique_message(self, arg_1: int, arg_2: int) -> None:
+        with self.__lock:
+            try:
+                func, future = self.__pending_jobs.popleft()
+            except IndexError:
+                return
+
+        running = future.set_running_or_notify_cancel()
+        if running:
+            try:
+                future.set_result(func())
+            except BaseException as e:
+                future.set_exception(e)
+
+    def shutdown(self, wait: bool = True, *, cancel_futures: bool = False) -> None:
+        """See Python docs for `Executor.shutdown()`. Will cause the message loop thread to exit."""
+
+        futures_to_cancel = []
+
+        with self.__lock:
+            if self.__is_shut_down_event.is_set():
+                return
+
+            self.__is_shut_down_event.set()
+
+            if cancel_futures:
+                while self.__pending_jobs:
+                    _, future = self.__pending_jobs.popleft()
+                    futures_to_cancel.append(future)
+
+        for future in reversed(futures_to_cancel):
+            future.cancel()
+            #i Can run any third-party code registered with `Future.add_done_callback()`, which is why it shouldn't be done while holding the lock.
+
+        self.__message_loop.quit(wait, asap=cancel_futures)
+
+    @staticmethod
+    def __on_thread_exit(
+        downstream_on_thread_exit: Optional[OnThreadExitCallback],
+        lock: Lock,
+        is_shut_down_event: Event,
+        pending_jobs: __PendingJobsDeque,
+        label: str,
+    ):
+        try:
+            if downstream_on_thread_exit:
+                downstream_on_thread_exit()
+            #i Calling this first ensures removing hooks and such will unburden the message queue from incoming events before possible `Future` done-callbacks run.
+        finally:
+            with lock:
+                is_shut_down_event.set()
+
+                # Prevent waiting for `Future`s that can never complete.
+                message = None
+                while pending_jobs:
+                    _, future = pending_jobs.pop()  # From back to front.
+
+                    if not message:
+                        message = f"Thread of {label} exited."
+
+                    try:
+                        future.set_exception(BrokenExecutor(message))
+                        #i May run third-party code. See `shutdown()`.
+                    except InvalidStateError:  # `Future` already done.
+                        pass
