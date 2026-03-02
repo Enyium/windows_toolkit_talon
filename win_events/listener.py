@@ -24,8 +24,16 @@ class WinEventListener:
     """Lets you subscribe to win events to receive them in a separate thread."""
 
     class OnWinEventCallback(Protocol):
-        def __call__(self, event: int, hwnd: CType, object_id: int, child_id: int, thread_id: int, time_ms: int) -> None:
-        #i `self` just belongs to `Protocol`.
+        def __call__(
+            self,  # Just belongs to `Protocol`.
+            subscription_handle: int,
+            event: int,
+            hwnd: CType,
+            object_id: int,
+            child_id: int,
+            thread_id: int,
+            time_ms: int,
+        ) -> None:
             """See docs for the `WINEVENTPROC` WinAPI callback.
 
             `time_ms` is compatible with the `GetTickCount()` WinAPI function. Both wrap around to zero after `0xFFFF_FFFF`. The granularity of these values is relatively coarse.
@@ -153,6 +161,7 @@ class WinEventListener:
     ) -> None:
         try:
             tls = WinEventListener.__tls
+
             with tls.lock:
                 if tls.is_shut_down_event.is_set():
                     return
@@ -164,7 +173,8 @@ class WinEventListener:
 
             callback = weak_callback()
             if callback:
-                callback(event, hwnd, idObject, idChild, idEventThread, dwmsEventTime)
+                subscription_handle = int(wapi.cast("uintptr_t", hWinEventHook))
+                callback(subscription_handle, event, hwnd, idObject, idChild, idEventThread, dwmsEventTime)
             else:
                 success = user32.UnhookWinEvent(hWinEventHook)
                 if not success:

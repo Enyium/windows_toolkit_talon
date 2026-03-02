@@ -1,7 +1,10 @@
+from __future__ import annotations
+
 from collections import deque
 import ctypes
+from dataclasses import dataclass, field
 import math
-from threading import Condition
+from threading import Condition, Lock
 import time
 from types import TracebackType
 from typing import Literal, Optional, Self, Sequence, TYPE_CHECKING, Union
@@ -15,6 +18,7 @@ if app.platform == "windows" or TYPE_CHECKING:
     import pythoncom
     import win32com.client
     import win32con
+    import win32gui
     import winerror
 
     from ..lib.winapi import CType, kernel32, oleacc, user32, wapi
@@ -37,24 +41,6 @@ class WinEventTracker:
     - You can use Microsoft's AccEvent in "WinEvents (Out of Context)" mode to find utilizable events and other attributes for your use case. (<https://learn.microsoft.com/en-us/windows/win32/winauto/accessible-event-watcher>)
     """
 
-    #i If useful, another class `WinEventTrackerGroup` could be implemented with a constructor that takes any number of `WinEventTracker`s (with their own filter criteria) and that provides the same public methods. `WinEventTracker` would get an additional field `_shared_condition` that it notified and that `WinEventTrackerGroup` waited on. `WinEventTracker` would provide additional non-public methods that allowed `WinEventTrackerGroup` to check each `WinEventTracker` without waiting (logic currently in waiting methods). It's a kind of polling with intelligent waits told by the single `WinEventTracker`s (smallest waiting request wins). (Perhaps useful for implementation: `contextlib.ExitStack`.)
-    #i
-    #i `_shared_condition` needs to be accompanied by a flag to avoid lost wakeups, like so:
-    #i     # In win event thread after regular-`Condition` context.
-    #i     with self._shared_condition:
-    #i         self._shared_condition_notified_cell.value = True
-    #i         self._shared_condition.notify_all()
-    #i     
-    #i     # In regular thread.
-    #i     while True:
-    #i         ...
-    #i     
-    #i         with self._shared_condition:
-    #i             while not self._shared_condition_notified_cell.value:
-    #i                 timed_out = not self._shared_condition.wait(timeout)
-    #i                 #> Use `timed_out`.
-    #i             self._shared_condition_notified_cell.value = False
-
     @classmethod
     def _main(cls):
         listener_uuid4 = UUID("8b5e0d5c-629c-4f1b-9d29-a225b47a5529")
@@ -70,16 +56,7 @@ class WinEventTracker:
 
     def __init__(
         self,
-        events: Union[
-            WinEvent,
-            slice,
-            Sequence[Union[WinEvent, slice]],
-        ],
-        *,
-        object_id: Optional[int] = None,
-        object_id_is_custom: Optional[bool] = None,
-        target_is_object_itself: Optional[bool] = None,
-        role: Optional[Role] = None,
+        *subfilters: Subfilter,
         inclusive_ancestor_hwnd: Optional[int] = None,
         process_id: Optional[int] = None,
         thread_id: Optional[int] = None,
@@ -87,41 +64,32 @@ class WinEventTracker:
     ) -> None:
         """Creates an instance that filters win events according to the arguments and then lets you wait for a subset of events.
 
-        - `events` specifies single events and/or inclusive ranges of events.
-        - `object_id` accepts an `ObjectID` member or a custom ID found out by spying.
-        - `object_id_is_custom` specifies whether the object ID is not one of the predefined values.
-        - `target_is_object_itself` corresponds to `CHILDID_SELF` from Microsoft's docs.
-        - `role` is ignored for the events `OBJECT_CREATE` and `OBJECT_DESTROY`.
+        - The `subfilters` are combined with OR toward each other. The filter criteria inside and outside a `Subfilter` are combined with AND.
         - `timeout` may be overridden by a waiting method.
         """
 
-        # Hook filters.
-        if isinstance(events, (WinEvent, slice)):
-            events = (events,)
-        for event_or_slice in events:
-            if isinstance(event_or_slice, slice):
-                WinEventListener._verify_event_slice(event_or_slice)
-        self.__events = events
+        # Filters.
+        self.__subfilters = subfilters
 
-        self.__process_id = process_id
-        self.__thread_id = thread_id
-
-        # Own filters.
-        self.__object_id = object_id
-        self.__object_id_is_custom = object_id_is_custom
-        self.__target_is_object_itself = target_is_object_itself
-        self.__role = role
-
+        if (
+            inclusive_ancestor_hwnd is not None
+            and not win32gui.IsWindow(inclusive_ancestor_hwnd)  # Guards against `NULL`.
+        ):
+            raise ValueError("Inclusive-ancestor window doesn't exist.")
         self.__inclusive_ancestor_hwnd = (
             wapi.cast("HWND", inclusive_ancestor_hwnd)
             if inclusive_ancestor_hwnd is not None
             else None
         )
-        #i The event load can't be reliably reduced using the window's thread ID, because the window might not belong to same process or thread as the win event producer: Browsers have separate processes, UWP apps have a host process.
+        #i The event load can't be reliably reduced using the window's thread ID, because the window might not belong to same process or thread as the win event producer: E.g., browsers have separate processes and UWP apps have a host process.
 
-        #
+        self.__process_id = process_id
+        self.__thread_id = thread_id
+
+        # Operation.
         self.__entered = False
-        self.__subscription_handles = []
+        self.__subfilters_by_subscription_handles_lock = Lock()
+        self.__subfilters_by_subscription_handles: dict[int, Subfilter] = {}
         self.__timeout = timeout
 
         self.__num_events = 0
@@ -139,14 +107,19 @@ class WinEventTracker:
 
         self.__entered = True
 
-        for event_or_slice in self.__events:
-            subscription_handle = self.__listener.subscribe(
-                event_or_slice,
-                self.__process_id,
-                self.__thread_id,
-                on_winevent=self.__on_winevent,
-            )
-            self.__subscription_handles.append(subscription_handle)
+        for subfilter in self.__subfilters:
+            for event_or_slice in subfilter.normalized_events:
+                subscription_handle = self.__listener.subscribe(
+                    event_or_slice,
+                    self.__process_id,
+                    self.__thread_id,
+                    on_winevent=self.__on_winevent,
+                )
+                with self.__subfilters_by_subscription_handles_lock:
+                    self.__subfilters_by_subscription_handles[subscription_handle] = subfilter
+
+        self.__last_hwnd = None
+        self.__last_hwnd_has_inclusive_ancestor = False
 
         now = time.perf_counter()
         self.__waiting_start_time = now
@@ -156,6 +129,7 @@ class WinEventTracker:
 
     def __on_winevent(
         self,
+        subscription_handle: int,
         event: int,
         hwnd: CType,
         object_id: int,
@@ -171,91 +145,105 @@ class WinEventTracker:
         self.__num_events += 1
         num_events = self.__num_events
 
-        if self.__object_id is not None and object_id != self.__object_id:
-            return
-
-        if self.__object_id_is_custom is not None:
-            object_id_is_custom = object_id > 0
-            if object_id_is_custom != self.__object_id_is_custom:
-                return
-
-        if self.__target_is_object_itself is not None:
-            target_is_object_itself = child_id == win32con.CHILDID_SELF
-            if target_is_object_itself != self.__target_is_object_itself:
-                return
-
         if self.__inclusive_ancestor_hwnd is not None:
-            kernel32.SetLastError(winerror.ERROR_SUCCESS)
-            is_child = user32.IsChild(self.__inclusive_ancestor_hwnd, hwnd)
-            if not is_child:
-                last_error = kernel32.GetLastError()
-                if last_error != winerror.ERROR_SUCCESS:
-                    raise ctypes.WinError(last_error)
-
-            if not (hwnd == self.__inclusive_ancestor_hwnd or is_child):
-                return
-
-        if (
-            event != WinEvent.OBJECT_CREATE
-            and event != WinEvent.OBJECT_DESTROY
-            #i Event exclusions mandated by `AccessibleObjectFromEvent()` docs.
-            and self.__role is not None
-        ):
-            #i This if-body may cause the event handler to be reentered.
-
-            iaccessible_address = wapi.new("void **")
-            acc_object_child_id_cffi_variant = wapi.new("VARIANT *")
-            hresult = oleacc.AccessibleObjectFromEvent(
-                hwnd,
-                wapi.cast("DWORD", object_id),
-                wapi.cast("DWORD", child_id),
-                iaccessible_address,
-                acc_object_child_id_cffi_variant,
-            )
-
-            if hresult < 0:
-                # if hresult == winerror.E_INVALIDARG:
-                #     print(f"ERROR: `AccessibleObjectFromEvent()` call ended with error HRESULT 0x{hresult & 0xFFFF_FFFF:08X}. Arguments: hwnd = {hwnd}, object_id = {object_id}, child_id = {child_id}. event = {event}.")
-
-                if hresult == winerror.E_INVALIDARG or hresult == winerror.E_FAIL:
-                #i Errors that were encountered, but didn't appear to have a clear, avoidable cause.
-                    return  # Filters can't match.
-                else:
-                    raise ctypes.WinError(hresult)
+            if hwnd == self.__last_hwnd:
+                hwnd_has_inclusive_ancestor = self.__last_hwnd_has_inclusive_ancestor
             else:
-                acc_object = win32com.client.Dispatch(
-                    pythoncom.ObjectFromAddress(
-                        int(wapi.cast("uintptr_t", iaccessible_address[0])),
-                        pythoncom.IID_IDispatch,
-                    )
-                )
+                if hwnd != wapi.NULL:
+                    kernel32.SetLastError(winerror.ERROR_SUCCESS)
+                    is_child = user32.IsChild(self.__inclusive_ancestor_hwnd, hwnd)
+                    if not is_child:
+                        last_error = kernel32.GetLastError()
+                        if last_error != winerror.ERROR_SUCCESS:
+                            raise ctypes.WinError(last_error)
 
-                #i For the case that the `IAccessible` API doesn't work, AI recommended `win32com.client.gencache.EnsureDispatch()` instead of `win32com.client.Dispatch()`. Although this perhaps takes a moment on first run and is subject to the problems mentioned below.
-                #i
-                #i To learn more about the `IAccessible` API, look into `%TEMP%\gen_py\3.11\1EA4DBF0-3C3B-11CF-810C-00AA00389B71x0x1x1.py`. To generate the file, run the code told to you by doing the following in the Talon REPL:
-                #i     import sys
-                #i     from win32com.client import makepy
-                #i     sys.argv = "dummy -i oleacc.dll".split(" ")
-                #i     #i See `%ProgramFiles%\Talon\Lib\site-packages\win32com\client\makepy.py` for more switches.
-                #i     makepy.main()
-                #i Make sure to move the generated file to an ineffective directory, so changes like Talon and thus pywin32 updates don't introduce conflicts.
+                    hwnd_has_inclusive_ancestor = hwnd == self.__inclusive_ancestor_hwnd or is_child
+                else:
+                    hwnd_has_inclusive_ancestor = False
 
-                acc_object_child_id_cffi_variant_type = acc_object_child_id_cffi_variant._VARIANT_NAME_1._VARIANT_NAME_2.vt
-                if acc_object_child_id_cffi_variant_type != pythoncom.VT_I4:
-                    raise RuntimeError(f"Unexpected variant type {acc_object_child_id_cffi_variant_type} of accessible object's child ID.")
-                acc_object_child_id_variant = win32com.client.VARIANT(
-                    pythoncom.VT_I4,
-                    acc_object_child_id_cffi_variant._VARIANT_NAME_1._VARIANT_NAME_2._VARIANT_NAME_3.lVal,
-                )
+                self.__last_hwnd = hwnd
+                self.__last_hwnd_has_inclusive_ancestor = hwnd_has_inclusive_ancestor
 
-                if self.__role is not None:
-                    role: int = acc_object.GetaccRole(acc_object_child_id_variant)
-                    if role != self.__role:
-                        return
-
-            if self.__num_events_by_events.get(event, 0) > num_events:
-                # Forget this event, because its now old.
+            if not hwnd_has_inclusive_ancestor:
                 return
+
+        with self.__subfilters_by_subscription_handles_lock:
+            subfilter = self.__subfilters_by_subscription_handles.get(subscription_handle)
+        if subfilter is not None:
+            if subfilter.object_id is not None and object_id != subfilter.object_id:
+                return
+
+            if subfilter.object_id_is_custom is not None:
+                object_id_is_custom = object_id > 0
+                if object_id_is_custom != subfilter.object_id_is_custom:
+                    return
+
+            if subfilter.target_is_object_itself is not None:
+                target_is_object_itself = child_id == win32con.CHILDID_SELF
+                if target_is_object_itself != subfilter.target_is_object_itself:
+                    return
+
+            if (
+                event != WinEvent.OBJECT_CREATE
+                and event != WinEvent.OBJECT_DESTROY
+                #i Event exclusions mandated by `AccessibleObjectFromEvent()` docs.
+                and subfilter.role is not None
+            ):
+                #i This if-body may cause the event handler to be reentered.
+
+                iaccessible_address = wapi.new("void **")
+                acc_object_child_id_cffi_variant = wapi.new("VARIANT *")
+                hresult = oleacc.AccessibleObjectFromEvent(
+                    hwnd,
+                    wapi.cast("DWORD", object_id),
+                    wapi.cast("DWORD", child_id),
+                    iaccessible_address,
+                    acc_object_child_id_cffi_variant,
+                )
+
+                if hresult < 0:
+                    # if hresult == winerror.E_INVALIDARG:
+                    #     print(f"ERROR: `AccessibleObjectFromEvent()` call ended with error HRESULT 0x{hresult & 0xFFFF_FFFF:08X}. Arguments: hwnd = {hwnd}, object_id = {object_id}, child_id = {child_id}. event = {event}.")
+
+                    if hresult == winerror.E_INVALIDARG or hresult == winerror.E_FAIL:
+                    #i Errors that were encountered, but didn't appear to have a clear, avoidable cause.
+                        return  # Filters can't match.
+                    else:
+                        raise ctypes.WinError(hresult)
+                else:
+                    acc_object = win32com.client.Dispatch(
+                        pythoncom.ObjectFromAddress(
+                            int(wapi.cast("uintptr_t", iaccessible_address[0])),
+                            pythoncom.IID_IDispatch,
+                        )
+                    )
+
+                    #i For the case that the `IAccessible` API doesn't work, AI recommended `win32com.client.gencache.EnsureDispatch()` instead of `win32com.client.Dispatch()`. Although this perhaps takes a moment on first run and is subject to the problems mentioned below.
+                    #i
+                    #i To learn more about the `IAccessible` API, look into `%TEMP%\gen_py\3.11\1EA4DBF0-3C3B-11CF-810C-00AA00389B71x0x1x1.py`. To generate the file, run the code told to you by doing the following in the Talon REPL:
+                    #i     import sys
+                    #i     from win32com.client import makepy
+                    #i     sys.argv = "dummy -i oleacc.dll".split(" ")
+                    #i     #i See `%ProgramFiles%\Talon\Lib\site-packages\win32com\client\makepy.py` for more switches.
+                    #i     makepy.main()
+                    #i Make sure to move the generated file to an ineffective directory, so changes like Talon and thus pywin32 updates don't introduce conflicts.
+
+                    acc_object_child_id_cffi_variant_type = acc_object_child_id_cffi_variant._VARIANT_NAME_1._VARIANT_NAME_2.vt
+                    if acc_object_child_id_cffi_variant_type != pythoncom.VT_I4:
+                        raise RuntimeError(f"Unexpected variant type {acc_object_child_id_cffi_variant_type} of accessible object's child ID.")
+                    acc_object_child_id_variant = win32com.client.VARIANT(
+                        pythoncom.VT_I4,
+                        acc_object_child_id_cffi_variant._VARIANT_NAME_1._VARIANT_NAME_2._VARIANT_NAME_3.lVal,
+                    )
+
+                    if subfilter.role is not None:
+                        role: int = acc_object.GetaccRole(acc_object_child_id_variant)
+                        if role != subfilter.role:
+                            return
+
+                if self.__num_events_by_events.get(event, 0) > num_events:
+                    # Forget this event, because its now old.
+                    return
 
         # All filters matched, and it's the most recent event. Save it.
         with self.__condition:
@@ -398,8 +386,12 @@ class WinEventTracker:
         if events is not None:
             if isinstance(events, WinEvent):
                 events = (events,)
-        elif len(self.__events) == 1 and isinstance(self.__events[0], WinEvent):
-            events = self.__events
+        elif (
+            len(self.__subfilters) == 1
+            and len(subfilter_events := self.__subfilters[0].normalized_events) == 1
+            and isinstance(subfilter_events[0], WinEvent)  # Single event, not slice.
+        ):
+            events = subfilter_events
         else:
             raise ValueError("Win events are only optional when the instance was created with exactly one.")
 
@@ -407,9 +399,9 @@ class WinEventTracker:
 
     def __exit__(
         self,
-        exc_type: Optional[type[BaseException]],
-        exc_value: Optional[BaseException],
-        traceback: Optional[TracebackType],
+        exc_type: Optional[type[BaseException]] = None,
+        exc_value: Optional[BaseException] = None,
+        traceback: Optional[TracebackType] = None,
     ) -> Optional[Literal[True]]:
         """Stops listening for win events."""
 
@@ -418,10 +410,14 @@ class WinEventTracker:
 
         self.__entered = False
 
+        with self.__subfilters_by_subscription_handles_lock:
+            subscription_handles = list(self.__subfilters_by_subscription_handles.keys())
+            self.__subfilters_by_subscription_handles.clear()
+
         exceptions = None
-        for subscription_handle in self.__subscription_handles:
+        for handle in subscription_handles:
             try:
-                self.__listener.unsubscribe(subscription_handle)
+                self.__listener.unsubscribe(handle)
             except Exception as e:
                 if not exceptions:
                     exceptions = []
@@ -435,5 +431,39 @@ class WinEventTracker:
 
 
 _script_main_callbacks.append(WinEventTracker._main)
+
+
+@dataclass(kw_only=True, slots=True)
+class Subfilter:
+    events: Union[
+        WinEvent,
+        slice,
+        Sequence[Union[WinEvent, slice]],
+    ] = field(kw_only=False)
+    """Single events and/or inclusive ranges of events."""
+    normalized_events: Sequence[Union[WinEvent, slice]] = field(init=False)
+    """Autogenerated normalized variant of `events`."""
+
+    object_id: Optional[int] = None
+    """An `ObjectID` member or a custom ID found out by spying."""
+    object_id_is_custom: Optional[bool] = None
+    """Specifies whether the object ID is not one of the predefined `ObjectID` values, i.e., it's > 0."""
+    target_is_object_itself: Optional[bool] = None
+    """Corresponds to `CHILDID_SELF` from Microsoft docs."""
+    role: Optional[Role] = None
+    """Is ignored for the events `OBJECT_CREATE` and `OBJECT_DESTROY`."""
+
+    def __post_init__(self):
+        if isinstance(self.events, (WinEvent, slice)):
+            self.normalized_events = (self.events,)
+        else:
+            if not self.events:
+                raise ValueError("There must be at least one win event.")
+            self.normalized_events = self.events
+
+        for event_or_slice in self.normalized_events:
+            if isinstance(event_or_slice, slice):
+                WinEventListener._verify_event_slice(event_or_slice)
+
 
 _script_main()

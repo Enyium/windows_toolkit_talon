@@ -17,7 +17,7 @@ if app.platform == "windows" or TYPE_CHECKING:
 else:
     raise NotImplementedError("Unsupported OS.")
 
-from .win_events.tracker import WinEventTracker
+from .win_events.tracker import Subfilter, WinEventTracker
 from .win_events.constants import WinEvent, ObjectID
 
 _mod = Module()
@@ -130,9 +130,11 @@ class _InsertSession:
 
         with (
             WinEventTracker(
-                WinEvent.OBJECT_LOCATIONCHANGE,
-                #i In Windows Terminal, both `OBJECT_LOCATIONCHANGE` and `CONSOLE_CARET` didn't work. In `conhost.exe`, they did. (Windows 11 Home 24H2)
-                object_id=ObjectID.CARET,
+                Subfilter(
+                    WinEvent.OBJECT_LOCATIONCHANGE,
+                    #i In Windows Terminal, both `OBJECT_LOCATIONCHANGE` and `CONSOLE_CARET` didn't work. In `conhost.exe`, they did. (Windows 11 Home 24H2)
+                    object_id=ObjectID.CARET,
+                ),
                 inclusive_ancestor_hwnd=self._insertion_toplevel_hwnd,
                 timeout=_INSERTION_TIMEOUT,
             )
