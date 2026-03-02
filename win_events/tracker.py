@@ -31,10 +31,10 @@ def _script_main():
 
 
 class WinEventTracker:
-    """Tracks win events, e.g., to wait for them to, in turn, be able to continue automation at a reasonable time.
+    """Tracks win events. Among other things, this allows you to wait for their occurrence to in turn be able to continue UI automation at the appropriate time.
 
     - See also docs for the `SetWinEventHook()` WinAPI function.
-    - You can use Microsoft's AccEvent in "WinEvents (Out of Context)" mode to find utilizable events for your use case. (<https://learn.microsoft.com/en-us/windows/win32/winauto/accessible-event-watcher>)
+    - You can use Microsoft's AccEvent in "WinEvents (Out of Context)" mode to find utilizable events and other attributes for your use case. (<https://learn.microsoft.com/en-us/windows/win32/winauto/accessible-event-watcher>)
     """
 
     #i If useful, another class `WinEventTrackerGroup` could be implemented with a constructor that takes any number of `WinEventTracker`s (with their own filter criteria) and that provides the same public methods. `WinEventTracker` would get an additional field `_shared_condition` that it notified and that `WinEventTrackerGroup` waited on. `WinEventTracker` would provide additional non-public methods that allowed `WinEventTrackerGroup` to check each `WinEventTracker` without waiting (logic currently in waiting methods). It's a kind of polling with intelligent waits told by the single `WinEventTracker`s (smallest waiting request wins). (Perhaps useful for implementation: `contextlib.ExitStack`.)
@@ -77,6 +77,7 @@ class WinEventTracker:
         ],
         *,
         object_id: Optional[int] = None,
+        object_id_is_custom: Optional[bool] = None,
         target_is_object_itself: Optional[bool] = None,
         role: Optional[Role] = None,
         inclusive_ancestor_hwnd: Optional[int] = None,
@@ -88,6 +89,7 @@ class WinEventTracker:
 
         - `events` specifies single events and/or inclusive ranges of events.
         - `object_id` accepts an `ObjectID` member or a custom ID found out by spying.
+        - `object_id_is_custom` specifies whether the object ID is not one of the predefined values.
         - `target_is_object_itself` corresponds to `CHILDID_SELF` from Microsoft's docs.
         - `role` is ignored for the events `OBJECT_CREATE` and `OBJECT_DESTROY`.
         - `timeout` may be overridden by a waiting method.
@@ -106,6 +108,7 @@ class WinEventTracker:
 
         # Own filters.
         self.__object_id = object_id
+        self.__object_id_is_custom = object_id_is_custom
         self.__target_is_object_itself = target_is_object_itself
         self.__role = role
 
@@ -146,7 +149,6 @@ class WinEventTracker:
             self.__subscription_handles.append(subscription_handle)
 
         now = time.perf_counter()
-        self.__subscription_time = now
         self.__waiting_start_time = now
         self.__latest_event_time_at_last_had_call = math.nextafter(now, -math.inf)
 
@@ -171,6 +173,11 @@ class WinEventTracker:
 
         if self.__object_id is not None and object_id != self.__object_id:
             return
+
+        if self.__object_id_is_custom is not None:
+            object_id_is_custom = object_id > 0
+            if object_id_is_custom != self.__object_id_is_custom:
+                return
 
         if self.__target_is_object_itself is not None:
             target_is_object_itself = child_id == win32con.CHILDID_SELF
@@ -308,6 +315,8 @@ class WinEventTracker:
     ) -> None:
         """Like `wait()`, but raises a `TimeoutError`."""
 
+        events = self.__treat_events(events)
+
         in_time = self.wait(events, timeout)
         if not in_time:
             raise TimeoutError(f"None of the win events from `{events!r}` occurred before timeout.")
@@ -322,7 +331,7 @@ class WinEventTracker:
         - The event delivery latency is included in the silence duration. Expect at least 21 ms.
         - If the instance was created with just one event, `events` can be omitted.
 
-        Returns `False` on timeout (specified at instance creation).
+        Returns `False` on timeout (specified at instance creation). A timeout-related return may happen before the timeout is reached if there's no chance to fulfill the silence requirement before the deadline.
         """
 
         if not self.__entered:
@@ -360,6 +369,8 @@ class WinEventTracker:
         events: Optional[Union[WinEvent, Sequence[WinEvent]]] = None,
     ) -> None:
         """Like `wait_for_silence()`, but raises a `TimeoutError`."""
+
+        events = self.__treat_events(events)
 
         in_time = self.wait_for_silence(silence_duration, events)
         if not in_time:
