@@ -382,6 +382,7 @@ class WinEventTracker:
 
         return result
 
+    #TODO: Make events optional when no slices where used or even support small slices. Cache result. Update docstrings about this.
     def __treat_events(self, events: Optional[Union[WinEvent, Sequence[WinEvent]]] = None) -> Sequence[WinEvent]:
         if events is not None:
             if isinstance(events, WinEvent):

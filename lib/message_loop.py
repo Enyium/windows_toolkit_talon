@@ -32,6 +32,16 @@ else:
 _pymod_termination_hook = get_pymod_termination_hook()
 
 
+#TODO: LATE: The following list of events/event providers could be useful. A new class would be needed that provides an interface using Talon's `dispatch.pyi`. `MessageLoop` would need an invisible window to receive messages that's created if the handler `on_window_message` is passed (not a message-only window, because these don't receive broadcast messages).
+#      - WTSRegisterSessionNotification()
+#      - [Power management functions](https://learn.microsoft.com/en-us/windows/win32/power/power-management-functions)
+#        - E.g., switching screen on and off: `RegisterPowerSettingNotification()` (windowless variant: `PowerSettingRegisterNotification()`). (The docs' remarks for `PowerSettingRegisterNotification()` say something important that isn't stated for `RegisterPowerSettingNotification()`, although the latter *seems* to behave the same.)
+#      - `RegisterWindowMessageW("TaskbarCreated")` (after `explorer.exe` restart) and `RegisterWindowMessageW("TaskbarButtonCreated")`
+#      - RegisterShellHookWindow()
+#      - WM_QUERYENDSESSION, WM_ENDSESSION, WM_POWERBROADCAST, WM_SETTINGCHANGE, WM_DISPLAYCHANGE, (WM_DEVMODECHANGE), WM_DEVICECHANGE, WM_SYSCOLORCHANGE, WM_THEMECHANGED
+#      - AddClipboardFormatListener()
+#      - `SetWinEventHook()` (only select events)
+#      - SHChangeNotifyRegister()
 class MessageLoop:
     """Maintains a separate thread with a Win32 message loop.
     

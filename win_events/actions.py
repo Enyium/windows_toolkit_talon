@@ -14,6 +14,7 @@ _tracker: Optional[WinEventTracker] = None
 _tracker_cleanup_job: Optional[Job] = None
 
 
+#TODO: When quickly switching to another window (not when letting the user control the switcher window), it may be beneficial to wait for `WinEvent.SYSTEM_SWITCHEND`. But maybe directly in .py code.
 @_mod.action_class
 class _Actions:
     def track_focus():
