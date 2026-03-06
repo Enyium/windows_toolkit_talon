@@ -243,9 +243,9 @@ class _Detector:
     #i - Detect It Easy (<https://horsicq.github.io/#detect-it-easydie>)
 
     def __call__(self, toplevel_window: Window) -> UIFramework:
-        return self._check_cache_and_toplevel_window(toplevel_window, _schedule_retry)
+        return self.__check_cache_and_toplevel_window(toplevel_window, _schedule_retry)
 
-    def _check_cache_and_toplevel_window(self, toplevel_window: Window, schedule_retry_or_noop: Callable[[Window], None]) -> UIFramework:
+    def __check_cache_and_toplevel_window(self, toplevel_window: Window, schedule_retry_or_noop: Callable[[Window], None]) -> UIFramework:
         """Reads the top-level window's UI framework from its window properties, or tries to recognize it."""
 
         # Read cached assessment, if available.
@@ -266,7 +266,7 @@ class _Detector:
 
         # Assess.
         try:
-            framework = self._check_toplevel_window(toplevel_window, schedule_retry_or_noop)
+            framework = self.__check_toplevel_window(toplevel_window, schedule_retry_or_noop)
 
             # Cache assessment inside window itself.
             if _MUST_CACHE_ASSESSMENT and framework != UIFramework.PENDING:
@@ -303,7 +303,7 @@ class _Detector:
 
         return framework
 
-    def _check_toplevel_window(self, toplevel_window: Window, schedule_retry_or_noop: Callable[[Window], None]) -> UIFramework:
+    def __check_toplevel_window(self, toplevel_window: Window, schedule_retry_or_noop: Callable[[Window], None]) -> UIFramework:
         """Tries to recognize the top-level window's UI framework."""
 
         class ExtraSource(Enum):
@@ -370,10 +370,10 @@ class _Detector:
         for source in extra_sources:
             match source:
                 case ExtraSource.CHILD_WINDOW_TREE:
-                    framework = self._check_child_window_tree(toplevel_window)
+                    framework = self.__check_child_window_tree(toplevel_window)
 
                 case ExtraSource.MODULE_FILENAMES:
-                    framework, is_std_dialog = self._check_module_filenames(
+                    framework, is_std_dialog = self.__check_module_filenames(
                         toplevel_window,
                         expected_module_based_frameworks,
                         wants_dialog_check=is_dialog,
@@ -383,14 +383,14 @@ class _Detector:
                     if not is_std_dialog:
                         owner_window = _get_owner_window(toplevel_window)
                         if owner_window and owner_window.app.pid == toplevel_window.app.pid:
-                            owner_framework = self._check_cache_and_toplevel_window(
+                            owner_framework = self.__check_cache_and_toplevel_window(
                                 owner_window, lambda _: None
                             )
                             if owner_framework.is_concrete:
                                 framework = owner_framework
 
                 case ExtraSource.UIA_DATA:
-                    framework = self._check_uia_data(toplevel_window)
+                    framework = self.__check_uia_data(toplevel_window)
 
             if framework != UIFramework.UNKNOWN:
                 if framework == UIFramework.PENDING:
@@ -407,7 +407,7 @@ class _Detector:
 
         return framework
 
-    def _check_child_window_tree(self, toplevel_window: Window, possible_frameworks: Optional[set[UIFramework]] = None) -> UIFramework:
+    def __check_child_window_tree(self, toplevel_window: Window, possible_frameworks: Optional[set[UIFramework]] = None) -> UIFramework:
         """Tries to recognize the top-level window's UI framework by its Win32 child window tree."""
 
         wants_mfc = possible_frameworks is None or UIFramework.MFC in possible_frameworks
@@ -485,7 +485,7 @@ class _Detector:
 
         return framework
 
-    def _check_module_filenames(self, toplevel_window: Window, possible_frameworks: Optional[set[UIFramework]] = None, wants_dialog_check: bool = False) -> tuple[UIFramework, bool]:
+    def __check_module_filenames(self, toplevel_window: Window, possible_frameworks: Optional[set[UIFramework]] = None, wants_dialog_check: bool = False) -> tuple[UIFramework, bool]:
         """Tries to recognize the process's UI framework by its module filenames (mostly DLLs).
         
         Optionally checks whether the window was created by a Windows DLL known to create standard dialogs. If so, the second return value will be `True`. Besides the case with no such DLL, if a hint for a desired UI framework was found before encountering one of said DLLs, `False` is returned. The argument activating this check should only be set to `True` if the top-level window's class name hints towards a dialog (like `#32770`).
@@ -562,7 +562,7 @@ class _Detector:
 
         return (UIFramework.UNKNOWN, plausibly_std_dialog)
 
-    def _check_uia_data(self, toplevel_window: Window, possible_frameworks: Optional[set[UIFramework]] = None) -> UIFramework:
+    def __check_uia_data(self, toplevel_window: Window, possible_frameworks: Optional[set[UIFramework]] = None) -> UIFramework:
         """Tries to recognize the top-level window's UI framework by its UI Automation data."""
 
         wants_wpf = possible_frameworks is None or UIFramework.WPF in possible_frameworks

@@ -119,7 +119,7 @@ class _MainActions:
 
 
 class _InsertSession:
-    _VKS_BY_SELECT_ASCII_CODES = {
+    __VKS_BY_SELECT_ASCII_CODES = {
         # Keyboard-layout-invariant virtual-key codes that don't work with `SendInput()`'s `KEYEVENTF_UNICODE` flag.
         0x08: win32con.VK_BACK,
         0x09: win32con.VK_TAB,
@@ -128,24 +128,24 @@ class _InsertSession:
     }
 
     def __init__(self):
-        self._start_time = None
+        self.__start_time = None
 
-        self._must_yield_time = settings.get("user.si_insert__yield_time")
-        self._caret_still_duration = max(0, settings.get("user.si_insert__caret_still_ms") / 1000)
-        self._wait_before_supp_char = settings.get("user.si_insert__caret_still_before_supp_char")
-        self._wait_before_tab = settings.get("user.si_insert__caret_still_before_tab")
-        self._wait_before_enter = settings.get("user.si_insert__caret_still_before_enter")
-        self._wait_before_backspace = settings.get("user.si_insert__caret_still_before_backspace")
-        self._wait_before_esc = settings.get("user.si_insert__caret_still_before_esc")
-        self._wait_at_end = settings.get("user.si_insert__caret_still_at_end")
+        self.__must_yield_time = settings.get("user.si_insert__yield_time")
+        self.__caret_still_duration = max(0, settings.get("user.si_insert__caret_still_ms") / 1000)
+        self.__wait_before_supp_char = settings.get("user.si_insert__caret_still_before_supp_char")
+        self.__wait_before_tab = settings.get("user.si_insert__caret_still_before_tab")
+        self.__wait_before_enter = settings.get("user.si_insert__caret_still_before_enter")
+        self.__wait_before_backspace = settings.get("user.si_insert__caret_still_before_backspace")
+        self.__wait_before_esc = settings.get("user.si_insert__caret_still_before_esc")
+        self.__wait_at_end = settings.get("user.si_insert__caret_still_at_end")
 
-        self._events = None
-        self._num_events = 0
+        self.__events = None
+        self.__num_events = 0
 
-        self._gui_thread_info = wapi.new("GUITHREADINFO *", {"cbSize": wapi.sizeof("GUITHREADINFO")})
-        self._insertion_toplevel_hwnd = None
-        self._insertion_hwnd = None
-        self._menu_active_at_start = False
+        self.__gui_thread_info = wapi.new("GUITHREADINFO *", {"cbSize": wapi.sizeof("GUITHREADINFO")})
+        self.__insertion_toplevel_hwnd = None
+        self.__insertion_hwnd = None
+        self.__menu_active_at_start = False
 
     def __call__(self, text):
         # Convert text to UTF-16 code units.
@@ -156,29 +156,29 @@ class _InsertSession:
             raise ValueError("Malformed UTF-16.")
 
         # Establish windows.
-        self._fill_gui_thread_info()
+        self.__fill_gui_thread_info()
 
-        self._insertion_toplevel_hwnd = self._gui_thread_info.hwndActive
-        self._insertion_hwnd = self._get_insertion_hwnd(False)
+        self.__insertion_toplevel_hwnd = self.__gui_thread_info.hwndActive
+        self.__insertion_hwnd = self.__get_insertion_hwnd(False)
 
         active_window = ui.active_window()
-        if wapi.cast("HWND", active_window.id) != self._insertion_toplevel_hwnd:
-            raise RuntimeError(f"Talon and utilized WinAPI disagree about active window during text insertion. Talon: `{active_window}` (ID 0x{active_window.id:X}). `GUITHREADINFO.hwndActive`: {self._insertion_toplevel_hwnd}.")
+        if wapi.cast("HWND", active_window.id) != self.__insertion_toplevel_hwnd:
+            raise RuntimeError(f"Talon and utilized WinAPI disagree about active window during text insertion. Talon: `{active_window}` (ID 0x{active_window.id:X}). `GUITHREADINFO.hwndActive`: {self.__insertion_toplevel_hwnd}.")
 
         # Limit insertion if menu active.
-        if self._gui_thread_info.flags & (win32con.GUI_SYSTEMMENUMODE | win32con.GUI_INMENUMODE | win32con.GUI_POPUPMENUMODE):
-            self._menu_active_at_start = True
+        if self.__gui_thread_info.flags & (win32con.GUI_SYSTEMMENUMODE | win32con.GUI_INMENUMODE | win32con.GUI_POPUPMENUMODE):
+            self.__menu_active_at_start = True
             if len(text) > 1:
                 raise RuntimeError("Received more than one character to insert while menu is active. Text insertion aborted.")
         #i See also `_flush_queue()`.
 
         # Create event queue.
         capacity = len(code_units) * 2  # Down and up for every code unit.
-        self._events = wapi.new("INPUT[]", capacity)
-        self._num_events = 0
+        self.__events = wapi.new("INPUT[]", capacity)
+        self.__num_events = 0
 
         # Send events batchwise.
-        self._start_time = time.perf_counter()
+        self.__start_time = time.perf_counter()
 
         with (
             WinEventTracker(
@@ -197,18 +197,18 @@ class _InsertSession:
                     WinEvent.OBJECT_VALUECHANGE,
                     role=Role.STATICTEXT,  # Yes, static.
                 ),
-                inclusive_ancestor_hwnd=int(wapi.cast("uintptr_t", self._insertion_toplevel_hwnd)),
+                inclusive_ancestor_hwnd=int(wapi.cast("uintptr_t", self.__insertion_toplevel_hwnd)),
                 timeout=_INSERTION_TIMEOUT,
             )
             if (
-                self._caret_still_duration
+                self.__caret_still_duration
                 and (
-                    self._wait_before_supp_char
-                    or self._wait_before_tab
-                    or self._wait_before_enter
-                    or self._wait_before_backspace
-                    or self._wait_before_esc
-                    or self._wait_at_end
+                    self.__wait_before_supp_char
+                    or self.__wait_before_tab
+                    or self.__wait_before_enter
+                    or self.__wait_before_backspace
+                    or self.__wait_before_esc
+                    or self.__wait_at_end
                 )
             )
             else nullcontext()
@@ -226,7 +226,7 @@ class _InsertSession:
 
             for code_unit in code_units:
                 # Identify event.
-                vk = _InsertSession._VKS_BY_SELECT_ASCII_CODES.get(code_unit)
+                vk = _InsertSession.__VKS_BY_SELECT_ASCII_CODES.get(code_unit)
                 is_vk_event = vk is not None
 
                 is_printable = code_unit >= 0x20 and code_unit != 0x7F
@@ -238,40 +238,40 @@ class _InsertSession:
 
                 # Regular flushing, so checks aren't delayed for too long.
                 #TODO: This can split surrogate pairs, which should be avoided. Probably give up early UTF-16 conversion and do it per character. Then also ensure that all four events of a supplementary character are flushed at once.
-                if self._num_events >= 50 * 2:
-                    self._flush_queue()
+                if self.__num_events >= 50 * 2:
+                    self.__flush_queue()
 
                 # Wait.
                 must_wait = (
                     caret_tracker
                     and (
-                        (self._wait_before_supp_char and not had_surrogate and is_surrogate)
-                        or (self._wait_before_tab and vk == win32con.VK_TAB)
-                        or (self._wait_before_enter and vk == win32con.VK_RETURN)
-                        or (self._wait_before_backspace and vk == win32con.VK_BACK)
-                        or (self._wait_before_esc and vk == win32con.VK_ESCAPE)
+                        (self.__wait_before_supp_char and not had_surrogate and is_surrogate)
+                        or (self.__wait_before_tab and vk == win32con.VK_TAB)
+                        or (self.__wait_before_enter and vk == win32con.VK_RETURN)
+                        or (self.__wait_before_backspace and vk == win32con.VK_BACK)
+                        or (self.__wait_before_esc and vk == win32con.VK_ESCAPE)
                     )
                     and did_enqueue
                 )
                 if must_wait:
-                    self._flush_queue()
-                    caret_tracker.require_silence(self._caret_still_duration, WAITING_EVENTS)
+                    self.__flush_queue()
+                    caret_tracker.require_silence(self.__caret_still_duration, WAITING_EVENTS)
 
-                if self._must_yield_time:
-                    self._flush_queue()
-                    self._yield_to_target(self._insertion_hwnd)
+                if self.__must_yield_time:
+                    self.__flush_queue()
+                    self.__yield_to_target(self.__insertion_hwnd)
 
                 # Enqueue.
                 for up in (False, True):
                     if is_vk_event:
-                        self._enqueue_vk_event(vk, up)
+                        self.__enqueue_vk_event(vk, up)
                     else:
-                        self._enqueue_utf16_code_unit_event(code_unit, up)
+                        self.__enqueue_utf16_code_unit_event(code_unit, up)
 
                 did_enqueue = True
 
                 # Prevent OS session becoming unusable due to overly long runtime.
-                if time.perf_counter() - self._start_time >= _INSERTION_TIMEOUT:
+                if time.perf_counter() - self.__start_time >= _INSERTION_TIMEOUT:
                     raise TimeoutError("Text insertion took too long.")
 
                 #
@@ -280,15 +280,15 @@ class _InsertSession:
             # Final batch.
             must_wait = (
                 caret_tracker
-                and self._wait_at_end
-                and self._num_events > 1
+                and self.__wait_at_end
+                and self.__num_events > 1
                 #i A single event must be an up-event, and waiting for an up-event shouldn't be necessary, because apps generally only insert characters on down-events.
             )
-            self._flush_queue()
+            self.__flush_queue()
             if must_wait:
-                caret_tracker.require_silence(self._caret_still_duration, WAITING_EVENTS)
+                caret_tracker.require_silence(self.__caret_still_duration, WAITING_EVENTS)
 
-    def _yield_to_target(self, insertion_hwnd: CType):
+    def __yield_to_target(self, insertion_hwnd: CType):
         """Yields time to the target thread of the insertion.
 
         Blocks until the target thread is in its Win32 message loop again to give it time to process previous events, which may have been transferred to a UI-framework-specific message loop. This is relevant in Qt apps that tend to insert Unicode supplementary characters from later in the event stream before earlier BMP characters. It's *especially* relevant in the output pane of Qt-based gImageReader v3.4.3 where each new character initiates a text check; it's worse with longer text box contents. In Qt apps, without yielding, there can also be problems with the very first insertion of text containing supplementary characters after app start.
@@ -314,13 +314,13 @@ class _InsertSession:
             else:
                 raise ctypes.WinError(last_error)
 
-    def _enqueue_vk_event(self, vk: int, up: bool):
+    def __enqueue_vk_event(self, vk: int, up: bool):
         scancode = win32api.MapVirtualKey(vk, user32.MAPVK_VK_TO_VSC_EX)
         has_e0_extended_scan_code = (scancode & 0xFF00) == 0xE000
         #i - AI GPT-5.2 thinks `wScan` must not contain the extended-prefix. But the docs for `KEYEVENTF_EXTENDEDKEY` seem to say otherwise.
         #i - We just ignore 0 on missing translation, because we don't use `KEYEVENTF_SCANCODE`, but primarily rely on the virtual-key code. The scancode is just for maximizing compatibility.
 
-        event = self._events[self._num_events]
+        event = self.__events[self.__num_events]
 
         event.type = win32con.INPUT_KEYBOARD
         event.DUMMYUNIONNAME.ki.wVk = vk
@@ -336,10 +336,10 @@ class _InsertSession:
         event.DUMMYUNIONNAME.ki.time = 0
         event.DUMMYUNIONNAME.ki.dwExtraInfo = 0
 
-        self._num_events += 1
+        self.__num_events += 1
 
-    def _enqueue_utf16_code_unit_event(self, code_unit: int, up: bool):
-        event = self._events[self._num_events]
+    def __enqueue_utf16_code_unit_event(self, code_unit: int, up: bool):
+        event = self.__events[self.__num_events]
 
         event.type = win32con.INPUT_KEYBOARD
         event.DUMMYUNIONNAME.ki.wVk = 0
@@ -353,27 +353,27 @@ class _InsertSession:
         event.DUMMYUNIONNAME.ki.time = 0
         event.DUMMYUNIONNAME.ki.dwExtraInfo = 0
 
-        self._num_events += 1
+        self.__num_events += 1
 
-    def _flush_queue(self):
-        if self._num_events <= 0:
+    def __flush_queue(self):
+        if self.__num_events <= 0:
             return
 
         #TODO: Maybe implement `_emergency_keyup()` function and use it in a `finally` block, perhaps in `__call__()`. Continue with regular `insert()` action, so user stays able to insert text. But only if the exception wasn't flagged as okay to abort insertion.
         #TODO: Use `WinEventTracker.had()` to check whether the menu was focused (or focus in general was changed) since the last `SendInput()` call.
         # Check for various obstacles. (Exceptions could theoretically lead to key-down without key-up event. Severity yet unknown.)
-        self._fill_gui_thread_info()
+        self.__fill_gui_thread_info()
 
-        insertion_hwnd = self._get_insertion_hwnd()
-        if insertion_hwnd != self._insertion_hwnd:
-            raise RuntimeError(f"Window changed during text insertion. Insertion aborted. Original: `{self._insertion_hwnd}`. Displacing: `{insertion_hwnd}`.")
+        insertion_hwnd = self.__get_insertion_hwnd()
+        if insertion_hwnd != self.__insertion_hwnd:
+            raise RuntimeError(f"Window changed during text insertion. Insertion aborted. Original: `{self.__insertion_hwnd}`. Displacing: `{insertion_hwnd}`.")
 
-        menu_active = self._gui_thread_info.flags & (win32con.GUI_SYSTEMMENUMODE | win32con.GUI_INMENUMODE | win32con.GUI_POPUPMENUMODE)
-        if not self._menu_active_at_start and menu_active:
+        menu_active = self.__gui_thread_info.flags & (win32con.GUI_SYSTEMMENUMODE | win32con.GUI_INMENUMODE | win32con.GUI_POPUPMENUMODE)
+        if not self.__menu_active_at_start and menu_active:
             raise RuntimeError("Menu appeared. Text insertion aborted.")
         #i This technique only works for traditional Win32 menus incl. a window's system menu. The universal way would be to check whether `talon.windows.ax.get_focused_element().control_type` is `"MenuBar"` or `"MenuItem"`. But unfortunately, this API is very slow and would introduce a delay of up to about 83 ms before most flushes, according to the author's measurements.
 
-        if self._gui_thread_info.flags & win32con.GUI_INMOVESIZE:
+        if self.__gui_thread_info.flags & win32con.GUI_INMOVESIZE:
             raise RuntimeError("Window is being moved or resized. Text insertion aborted.")
 
         if any(win32api.GetAsyncKeyState(key) < 0 for key in _MODIFIER_KEYS):
@@ -382,27 +382,27 @@ class _InsertSession:
             raise RuntimeError("Mouse key held down. Text insertion aborted.")
 
         # Send queued events.
-        num_events_sent = user32.SendInput(self._num_events, self._events, wapi.sizeof("INPUT"))
+        num_events_sent = user32.SendInput(self.__num_events, self.__events, wapi.sizeof("INPUT"))
         if not num_events_sent:
             raise ctypes.WinError(kernel32.GetLastError())
-        if num_events_sent != self._num_events:
-            raise RuntimeError(f"Could only send {num_events_sent} of {self._num_events} keyboard events.")
+        if num_events_sent != self.__num_events:
+            raise RuntimeError(f"Could only send {num_events_sent} of {self.__num_events} keyboard events.")
         #i `SendInput()` can take a considerable amount of time (like > 1 s for long text). Its return time seems to correlate with the time where the foreground thread's message queue already received the events or will receive them briefly after (not guaranteed though). After that, text display can lag significantly as the app processes the messages in its queue (e.g., in Notepad and gImageReader).
 
         # Reset event queue with regard to next flush.
-        self._num_events = 0
+        self.__num_events = 0
 
-    def _fill_gui_thread_info(self):
+    def __fill_gui_thread_info(self):
         """Fetches the `GUITHREADINFO` for the current foreground thread and saves it in the instance."""
 
-        success = user32.GetGUIThreadInfo(0, self._gui_thread_info)
+        success = user32.GetGUIThreadInfo(0, self.__gui_thread_info)
         if not success:
             raise ctypes.WinError(kernel32.GetLastError())
 
-    def _get_insertion_hwnd(self, is_inserting: bool = True) -> CType:
+    def __get_insertion_hwnd(self, is_inserting: bool = True) -> CType:
         """Checks and retrieves the specific `HWND` from the current `GUITHREADINFO` that'll also receive the `SendInput()` events from the OS."""
 
-        hwnd = self._gui_thread_info.hwndFocus or self._gui_thread_info.hwndActive
+        hwnd = self.__gui_thread_info.hwndFocus or self.__gui_thread_info.hwndActive
         #i - `hwndActive` is always a top-level window.
         #i - For classical Win32 apps, `hwndFocus` is a control.
         #i - For UWP apps, which are hosted by `ApplicationFrameHost.exe`, `hwndActive` is the hosting top-level window from said .exe, and `hwndFocus` is the child window from the actual app process (another .exe) that renders the window's client area etc.

@@ -12,7 +12,7 @@ class StrCarryingOneBasedIntEnum(IntEnum):
 
         obj = int.__new__(cls, value)
         obj._value_ = value
-        obj._string = string
+        obj.__string = string
         return obj
 
     @classmethod
@@ -20,4 +20,4 @@ class StrCarryingOneBasedIntEnum(IntEnum):
         return 1 + len(cls)
 
     def __str__(self) -> str:
-        return self._string
+        return self.__string
