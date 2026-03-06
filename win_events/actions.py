@@ -117,6 +117,7 @@ class _Actions:
                 WinEvent.OBJECT_LOCATIONCHANGE,
                 object_id=ObjectID.CARET,
             ),
+            Subfilter(WinEvent.OBJECT_TEXTSELECTIONCHANGED),  # UWP apps.
             timeout=3,
         )
         generic_tracker = WinEventTracker(Subfilter(

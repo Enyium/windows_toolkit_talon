@@ -1,5 +1,5 @@
 user.ui_framework: Qt
 -
 settings():
-    user.caret_standstill_ms_before_ready = 55
-    #i Otherwise, most often, Unicode supplementary characters are dragged before earlier BMP characters of the same insertion.
+    user.si_insert__yield_time = true
+    user.si_insert__caret_still_before_supp_char = true

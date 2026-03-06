@@ -1,1 +1,1 @@
-tag(): user.smart_input_insert_active
+tag(): user.si_insert__active
