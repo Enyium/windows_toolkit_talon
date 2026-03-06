@@ -52,7 +52,7 @@ class MessageLoop:
 
     def __init__(
         self,
-        instance_uuid4: str,
+        instance_uuid4: UUID,
         *,
         on_thread_created: Optional[Callable[[], None]] = None,
         on_unique_message: Optional[Callable[[int, int], None]] = None,
