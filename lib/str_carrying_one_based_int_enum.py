@@ -8,8 +8,7 @@ class StrCarryingOneBasedIntEnum(IntEnum):
     """
 
     def __new__(cls, string: str):
-        value = getattr(cls, "_next_id", 1)
-        cls._next_id = value + 1
+        value = len(cls) + 1
 
         obj = int.__new__(cls, value)
         obj._value_ = value
