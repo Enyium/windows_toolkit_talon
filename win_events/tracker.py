@@ -107,6 +107,9 @@ class WinEventTracker:
 
         self.__entered = True
 
+        self.__last_hwnd = None
+        self.__last_hwnd_has_inclusive_ancestor = False
+
         for subfilter in self.__subfilters:
             for event_or_slice in subfilter.normalized_events:
                 subscription_handle = self.__listener.subscribe(
@@ -118,8 +121,7 @@ class WinEventTracker:
                 with self.__subfilters_by_subscription_handles_lock:
                     self.__subfilters_by_subscription_handles[subscription_handle] = subfilter
 
-        self.__last_hwnd = None
-        self.__last_hwnd_has_inclusive_ancestor = False
+        #i The win event handler method can be called immediately after subscription.
 
         now = time.perf_counter()
         self.__waiting_start_time = now
