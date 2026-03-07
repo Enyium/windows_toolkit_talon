@@ -128,16 +128,16 @@ class _InsertSession:
     }
 
     def __init__(self):
-        self.__start_time = None
+        self.__deadline = None
 
         self.__must_yield_time = settings.get("user.si_insert__yield_time")
         self.__caret_still_duration = max(0, settings.get("user.si_insert__caret_still_ms") / 1000)
-        self.__wait_before_supp_char = settings.get("user.si_insert__caret_still_before_supp_char")
-        self.__wait_before_tab = settings.get("user.si_insert__caret_still_before_tab")
-        self.__wait_before_enter = settings.get("user.si_insert__caret_still_before_enter")
-        self.__wait_before_backspace = settings.get("user.si_insert__caret_still_before_backspace")
-        self.__wait_before_esc = settings.get("user.si_insert__caret_still_before_esc")
-        self.__wait_at_end = settings.get("user.si_insert__caret_still_at_end")
+        self.__must_wait_before_supp_char = settings.get("user.si_insert__caret_still_before_supp_char")
+        self.__must_wait_before_tab = settings.get("user.si_insert__caret_still_before_tab")
+        self.__must_wait_before_enter = settings.get("user.si_insert__caret_still_before_enter")
+        self.__must_wait_before_backspace = settings.get("user.si_insert__caret_still_before_backspace")
+        self.__must_wait_before_esc = settings.get("user.si_insert__caret_still_before_esc")
+        self.__must_wait_at_end = settings.get("user.si_insert__caret_still_at_end")
 
         self.__events = None
         self.__num_events = 0
@@ -147,13 +147,8 @@ class _InsertSession:
         self.__insertion_hwnd = None
         self.__menu_active_at_start = False
 
-    def __call__(self, text):
-        # Convert text to UTF-16 code units.
-        utf16le_bytes = text.encode("utf-16-le", errors="surrogatepass")
-        code_units = memoryview(utf16le_bytes).cast("@H")  # Native-endian unsigned short.
-        if not _is_well_formed_utf16(code_units):
-        #i Doing this check in the event-sending loop could lead to unfinished input.
-            raise ValueError("Malformed UTF-16.")
+    def __call__(self, text: str):
+        self.__deadline = time.perf_counter() + _INSERTION_TIMEOUT
 
         # Establish windows.
         self.__fill_gui_thread_info()
@@ -170,16 +165,16 @@ class _InsertSession:
             self.__menu_active_at_start = True
             if len(text) > 1:
                 raise RuntimeError("Received more than one character to insert while menu is active. Text insertion aborted.")
-        #i See also `_flush_queue()`.
+        #i See also `__flush_queue()`.
 
         # Create event queue.
-        capacity = len(code_units) * 2  # Down and up for every code unit.
+        CODE_UNITS_PER_FLUSH_HINT = 50
+        capacity = (CODE_UNITS_PER_FLUSH_HINT + 1) * 2
+        #i One more, because a surrogate pair can lie on the edge and they're enqueued atomically. Down and up for every code unit.
         self.__events = wapi.new("INPUT[]", capacity)
         self.__num_events = 0
 
         # Send events batchwise.
-        self.__start_time = time.perf_counter()
-
         with (
             WinEventTracker(
                 Subfilter(
@@ -203,12 +198,12 @@ class _InsertSession:
             if (
                 self.__caret_still_duration
                 and (
-                    self.__wait_before_supp_char
-                    or self.__wait_before_tab
-                    or self.__wait_before_enter
-                    or self.__wait_before_backspace
-                    or self.__wait_before_esc
-                    or self.__wait_at_end
+                    self.__must_wait_before_supp_char
+                    or self.__must_wait_before_tab
+                    or self.__must_wait_before_enter
+                    or self.__must_wait_before_backspace
+                    or self.__must_wait_before_esc
+                    or self.__must_wait_at_end
                 )
             )
             else nullcontext()
@@ -222,38 +217,52 @@ class _InsertSession:
             )
 
             did_enqueue = False
-            had_surrogate = False
+            had_supp_char = False
 
-            for code_unit in code_units:
-                # Identify event.
-                vk = _InsertSession.__VKS_BY_SELECT_ASCII_CODES.get(code_unit)
-                is_vk_event = vk is not None
+            for code_point in map(ord, text):
+                # Determine event properties.
+                is_supp_char = code_point >= 0x10000
 
-                is_printable = code_unit >= 0x20 and code_unit != 0x7F
+                if is_supp_char:
+                    twenty_bits = code_point - 0x10000
+                    high_surrogate = 0xD800 + (twenty_bits >> 10)
+                    low_surrogate = 0xDC00 + (twenty_bits & 0b11_1111_1111)
 
-                if not (is_vk_event or is_printable):
-                    continue
+                    vk = None
+                    code_units = (high_surrogate, low_surrogate)
+                    must_wait_before_vk = False
+                elif 0xD800 <= code_point <= 0xDFFF:  # Surrogate.
+                    raise ValueError("String contains surrogate. Text insertion aborted.")
+                else:  # BMP character.
+                    vk = _InsertSession.__VKS_BY_SELECT_ASCII_CODES.get(code_point)
+                    code_units = (code_point,)
+                    must_wait_before_vk = (
+                        vk is not None
+                        and (
+                            (self.__must_wait_before_tab and vk == win32con.VK_TAB)
+                            or (self.__must_wait_before_enter and vk == win32con.VK_RETURN)
+                            or (self.__must_wait_before_backspace and vk == win32con.VK_BACK)
+                            or (self.__must_wait_before_esc and vk == win32con.VK_ESCAPE)
+                        )
+                    )
 
-                is_surrogate = code_unit >= 0xD800 and code_unit <= 0xDFFF
+                    is_printable = code_point >= 0x20 and code_point != 0x7F
+                    if vk is None and not is_printable:
+                        continue
 
-                # Regular flushing, so checks aren't delayed for too long.
-                #TODO: This can split surrogate pairs, which should be avoided. Probably give up early UTF-16 conversion and do it per character. Then also ensure that all four events of a supplementary character are flushed at once.
-                if self.__num_events >= 50 * 2:
+                # Flush regularly, so checks aren't delayed for too long.
+                if self.__num_events >= CODE_UNITS_PER_FLUSH_HINT * 2:
                     self.__flush_queue()
 
                 # Wait.
-                must_wait = (
-                    caret_tracker
+                if (
+                    did_enqueue
+                    and self.__caret_still_duration
                     and (
-                        (self.__wait_before_supp_char and not had_surrogate and is_surrogate)
-                        or (self.__wait_before_tab and vk == win32con.VK_TAB)
-                        or (self.__wait_before_enter and vk == win32con.VK_RETURN)
-                        or (self.__wait_before_backspace and vk == win32con.VK_BACK)
-                        or (self.__wait_before_esc and vk == win32con.VK_ESCAPE)
+                        (self.__must_wait_before_supp_char and not had_supp_char and is_supp_char)
+                        or must_wait_before_vk
                     )
-                    and did_enqueue
-                )
-                if must_wait:
+                ):
                     self.__flush_queue()
                     caret_tracker.require_silence(self.__caret_still_duration, WAITING_EVENTS)
 
@@ -262,25 +271,28 @@ class _InsertSession:
                     self.__yield_to_target(self.__insertion_hwnd)
 
                 # Enqueue.
-                for up in (False, True):
-                    if is_vk_event:
+                if vk is not None:
+                    for up in (False, True):
                         self.__enqueue_vk_event(vk, up)
-                    else:
-                        self.__enqueue_utf16_code_unit_event(code_unit, up)
+                else:
+                    for code_unit in code_units:
+                        for up in (False, True):
+                            self.__enqueue_utf16_code_unit_event(code_unit, up)
 
                 did_enqueue = True
 
                 # Prevent OS session becoming unusable due to overly long runtime.
-                if time.perf_counter() - self.__start_time >= _INSERTION_TIMEOUT:
+                if time.perf_counter() > self.__deadline:
                     raise TimeoutError("Text insertion took too long.")
 
                 #
-                had_surrogate = is_surrogate
+                had_supp_char = is_supp_char
 
             # Final batch.
             must_wait = (
-                caret_tracker
-                and self.__wait_at_end
+                did_enqueue
+                and self.__caret_still_duration
+                and self.__must_wait_at_end
                 and self.__num_events > 1
                 #i A single event must be an up-event, and waiting for an up-event shouldn't be necessary, because apps generally only insert characters on down-events.
             )
@@ -356,10 +368,12 @@ class _InsertSession:
         self.__num_events += 1
 
     def __flush_queue(self):
+        """Checks on a best-effort basis whether the insertion target changed or there's an interfering state like pressed modifier keys, and then sends the queued events via `SendInput()`."""
+
         if self.__num_events <= 0:
             return
 
-        #TODO: Maybe implement `_emergency_keyup()` function and use it in a `finally` block, perhaps in `__call__()`. Continue with regular `insert()` action, so user stays able to insert text. But only if the exception wasn't flagged as okay to abort insertion.
+        #TODO: Maybe implement `__emergency_keyup()` function and use it in a `finally` block, perhaps in `__call__()`. Continue with regular `insert()` action, so user stays able to insert text. But only if the exception wasn't flagged as okay to abort insertion.
         #TODO: Use `WinEventTracker.had()` to check whether the menu was focused (or focus in general was changed) since the last `SendInput()` call.
         # Check for various obstacles. (Exceptions could theoretically lead to key-down without key-up event. Severity yet unknown.)
         self.__fill_gui_thread_info()
@@ -415,18 +429,3 @@ class _InsertSession:
             )
 
         return hwnd
-
-
-def _is_well_formed_utf16(code_units):
-    had_high_surrogate = False
-    for code_unit in code_units:
-        is_low_surrogate = code_unit >= 0xDC00 and code_unit <= 0xDFFF
-        if (
-            (not had_high_surrogate and is_low_surrogate)
-            or (had_high_surrogate and not is_low_surrogate)
-        ):
-            return False
-
-        had_high_surrogate = code_unit >= 0xD800 and code_unit <= 0xDBFF
-
-    return not had_high_surrogate
