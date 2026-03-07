@@ -196,7 +196,7 @@ def _schedule_retry(window: Window):
             _retry_window = None
 
             # Cause `UIFramework.ERROR` up in the call stack.
-            raise RuntimeError("Couldn't detect UI framework before timeout.")
+            raise TimeoutError("Couldn't detect UI framework before timeout.")
     else:  # Just starting out.
         _retry_start = time.perf_counter()
 

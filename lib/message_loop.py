@@ -102,7 +102,7 @@ class MessageLoop:
         # Ensure initialization in thread is done before allowing to work with the instance.
         timed_out = not self.__thread_ready.wait(timeout=3)
         if timed_out:
-            raise RuntimeError(f"Thread of {self.__label} didn't become ready before timeout.")
+            raise TimeoutError(f"Thread of {self.__label} didn't become ready before timeout.")
 
     @staticmethod
     def __thread_main(weak_self: ReferenceType[Self]) -> None:

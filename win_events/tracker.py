@@ -232,7 +232,7 @@ class WinEventTracker:
 
                     acc_object_child_id_cffi_variant_type = acc_object_child_id_cffi_variant._VARIANT_NAME_1._VARIANT_NAME_2.vt
                     if acc_object_child_id_cffi_variant_type != pythoncom.VT_I4:
-                        raise RuntimeError(f"Unexpected variant type {acc_object_child_id_cffi_variant_type} of accessible object's child ID.")
+                        raise TypeError(f"Unexpected variant type {acc_object_child_id_cffi_variant_type} of accessible object's child ID.")
                     acc_object_child_id_variant = win32com.client.VARIANT(
                         pythoncom.VT_I4,
                         acc_object_child_id_cffi_variant._VARIANT_NAME_1._VARIANT_NAME_2._VARIANT_NAME_3.lVal,
