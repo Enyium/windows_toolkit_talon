@@ -148,6 +148,10 @@ class _InsertSession:
         self.__menu_active_at_start = False
 
     def __call__(self, text: str):
+        if not text:
+        #i TalonScript code sometimes contains `insert(capture or "")`.
+            return
+
         self.__deadline = time.perf_counter() + _INSERTION_TIMEOUT
 
         # Establish windows.
@@ -300,6 +304,8 @@ class _InsertSession:
             if must_wait:
                 caret_tracker.require_silence(self.__caret_still_duration, WAITING_EVENTS)
 
+            #i If unbalanced down-events were possible after flushing, an emergency key-up would be needed in an `except` block after a large `try` block.
+
     def __yield_to_target(self, insertion_hwnd: CType):
         """Yields time to the target thread of the insertion.
 
@@ -373,9 +379,8 @@ class _InsertSession:
         if self.__num_events <= 0:
             return
 
-        #TODO: Maybe implement `__emergency_keyup()` function and use it in a `finally` block, perhaps in `__call__()`. Continue with regular `insert()` action, so user stays able to insert text. But only if the exception wasn't flagged as okay to abort insertion.
         #TODO: Use `WinEventTracker.had()` to check whether the menu was focused (or focus in general was changed) since the last `SendInput()` call.
-        # Check for various obstacles. (Exceptions could theoretically lead to key-down without key-up event. Severity yet unknown.)
+        # Check for various obstacles.
         self.__fill_gui_thread_info()
 
         insertion_hwnd = self.__get_insertion_hwnd()
@@ -399,9 +404,26 @@ class _InsertSession:
         num_events_sent = user32.SendInput(self.__num_events, self.__events, wapi.sizeof("INPUT"))
         if not num_events_sent:
             raise ctypes.WinError(kernel32.GetLastError())
-        if num_events_sent != self.__num_events:
-            raise RuntimeError(f"Could only send {num_events_sent} of {self.__num_events} keyboard events.")
         #i `SendInput()` can take a considerable amount of time (like > 1 s for long text). Its return time seems to correlate with the time where the foreground thread's message queue already received the events or will receive them briefly after (not guaranteed though). After that, text display can lag significantly as the app processes the messages in its queue (e.g., in Notepad and gImageReader).
+
+        if num_events_sent != self.__num_events:
+            # Emergency key-up. (Only as long as modifiers aren't involved additionally.)
+            try:
+                event = self.__events[num_events_sent - 1]
+            except IndexError:
+                pass
+
+            extra_message = ""
+            if not (event.DUMMYUNIONNAME.ki.dwFlags & win32con.KEYEVENTF_KEYUP):
+                time.sleep(0.1)  # Failure may just be transient.
+
+                event.DUMMYUNIONNAME.ki.dwFlags |= win32con.KEYEVENTF_KEYUP
+                success = user32.SendInput(1, wapi.addressof(event), wapi.sizeof("INPUT"))  # Only best effort.
+                if not success:
+                    extra_message = " Emergency key-up also failed."
+
+            #
+            raise RuntimeError(f"Could only send {num_events_sent} of {self.__num_events} keyboard events.{extra_message}")
 
         # Reset event queue with regard to next flush.
         self.__num_events = 0
