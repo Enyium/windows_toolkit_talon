@@ -9,10 +9,16 @@ from .tracker import Subfilter, WinEventTracker
 
 _mod = Module()
 _mod.setting(
-    "si_tracking__waiting_timeout",
+    "si_tracking__window_activation_timeout",
+    type=float,
+    default=2.0,
+    desc="Seconds after which the `user.wait_for_window_activation()` actions raise a `TimeoutError`. Note that there's an additional non-configurable few-second timeout after which tracking is automatically aborted if a call to `user.track_window_activation()` isn't matched by a call to `user.wait_for_window_activation()`.",
+)
+_mod.setting(
+    "si_tracking__focus_timeout",
     type=float,
     default=1.0,
-    desc="Seconds after which the `user.wait_for_...()` actions raise a `TimeoutError`. Note that there's an additional non-configurable few-second timeout after which tracking is automatically aborted if a call to `user.track_...()` isn't matched by a call to `user.wait_for_...()`.",
+    desc="Same as `user.si_tracking__window_activation_timeout`, but for `user.…_focus()`.",
 )
 
 _ctx = Context()
@@ -25,20 +31,41 @@ _tracker: Optional[WinEventTracker] = None
 _tracker_cleanup_job: Optional[Job] = None
 
 
-#TODO: When quickly switching to another window (not when letting the user control the switcher window), it may be beneficial to wait for `WinEvent.SYSTEM_SWITCHEND`. But maybe directly in .py code.
+#TODO: WITH COMMUNITY PEOPLE: Have default actions in `community`, allowing users to install their tracker of choice that works for their OS? This would be similar to the default support of VS Code plus better support when installing the briding VS Code extension.
 @_mod.action_class
 class _Actions:
-    def track_focus():
+    def track_window_activation() -> None:
+        """Starts to track events about window activation.
+
+        Usage:
+
+            user.track_window_activation()
+            user.your_activation_action()
+            user.wait_for_window_activation("300ms")
+        """
+
+        if True:
+            pass
+
+    def wait_for_window_activation(fixed_fallback_duration: Union[float, str]) -> None:
+        """Waits until a window seems to have been activated. You must have called `user.track_window_activation()` first."""
+
+        actions.sleep(fixed_fallback_duration)
+
+    def track_focus() -> None:
         """Starts to track events from the active window that typically occur after a UI element focus change in most apps. Because this includes caret location change events, the caret must not still be moving from the previous action.
 
         Usage:
 
             user.track_focus()
             user.your_focus_action()
-            user.wait_for_focus(100ms)
+            user.wait_for_focus("100ms")
         """
 
-    def wait_for_focus(fixed_fallback_duration: Union[float, str]):
+        if True:
+            pass
+
+    def wait_for_focus(fixed_fallback_duration: Union[float, str]) -> None:
         """Waits until a UI element seems to have acquired focus. You must have called `user.track_focus()` first."""
 
         actions.sleep(fixed_fallback_duration)
@@ -46,7 +73,22 @@ class _Actions:
 
 @_ctx.action_class("user")
 class _UserActions:
-    def track_focus():
+    def track_window_activation() -> None:
+        global _tracker
+
+        with _lock:
+            _clean_up_tracker()
+
+            _tracker = WinEventTracker(Subfilter(WinEvent.SYSTEM_FOREGROUND))
+            _start_tracker()
+
+    def wait_for_window_activation(fixed_fallback_duration: Union[float, str]) -> None:
+        _wait_for_winevents(
+            WinEvent.SYSTEM_FOREGROUND,
+            timeout=settings.get("user.si_tracking__window_activation_timeout"),
+        )
+
+    def track_focus() -> None:
         global _tracker
 
         with _lock:
@@ -78,13 +120,16 @@ class _UserActions:
             )
             _start_tracker()
 
-    def wait_for_focus(fixed_fallback_duration: Union[float, str]):
-        _wait_for((WinEvent.OBJECT_FOCUS, WinEvent.OBJECT_LOCATIONCHANGE))
+    def wait_for_focus(fixed_fallback_duration: Union[float, str]) -> None:
+        _wait_for_winevents(
+            (WinEvent.OBJECT_FOCUS, WinEvent.OBJECT_LOCATIONCHANGE),
+            timeout=settings.get("user.si_tracking__focus_timeout"),
+        )
 
 
 @_mod.action_class
 class _TestActions:
-    def private_si_test_win_event_tracker():
+    def private_si_test_win_event_tracker() -> None:
         """Simple test for the `WinEventTracker` class."""
 
         caret_tracker = WinEventTracker(
@@ -113,7 +158,7 @@ class _TestActions:
 
             print("Done waiting.")
 
-    def private_si_test_wait_for_focus():
+    def private_si_test_wait_for_focus() -> None:
         """Test for the `user.wait_for_focus()` action."""
 
         import time
@@ -130,14 +175,14 @@ class _TestActions:
         print(f"Successfully waited for focus. Duration: {waiting_duration * 1000:.3f} ms.")
 
 
-def _start_tracker():
+def _start_tracker() -> None:
     """The caller is responsible for locking."""
 
     global _tracker_cleanup_job, _tracker
     _tracker_cleanup_job = cron.after("5s", _on_tracker_cleanup_job)
     _tracker.__enter__()
 
-def _wait_for(win_events: Union[WinEvent, Sequence[WinEvent]]):
+def _wait_for_winevents(win_events: Union[WinEvent, Sequence[WinEvent]], timeout: float) -> None:
     global _tracker
 
     with _lock:
@@ -150,12 +195,12 @@ def _wait_for(win_events: Union[WinEvent, Sequence[WinEvent]]):
     try:
         active_tracker.require(
             win_events,
-            timeout=settings.get("user.si_tracking__waiting_timeout"),
+            timeout,
         )  # May raise `TimeoutError`.
     finally:
         active_tracker.__exit__()
 
-def _clean_up_tracker(may_exit_context: bool = True):
+def _clean_up_tracker(may_exit_context: bool = True) -> None:
     """The caller is responsible for locking."""
 
     global _tracker_cleanup_job, _tracker
@@ -170,7 +215,7 @@ def _clean_up_tracker(may_exit_context: bool = True):
         finally:
             _tracker = None
 
-def _on_tracker_cleanup_job():
+def _on_tracker_cleanup_job() -> None:
     global _tracker, _tracker_cleanup_job
 
     with _lock:
