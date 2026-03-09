@@ -145,12 +145,12 @@ class _InsertSession:
         self.__gui_thread_info = wapi.new("GUITHREADINFO *", {"cbSize": wapi.sizeof("GUITHREADINFO")})
         self.__insertion_toplevel_hwnd = None
         self.__insertion_hwnd = None
-        self.__menu_active_at_start = False
+        self.__interference_tracker = None
 
     def __call__(self, text: str):
         if not text:
-        #i TalonScript code sometimes contains `insert(capture or "")`.
             return
+        #i TalonScript code sometimes contains `insert(capture or "")`.
 
         self.__deadline = time.perf_counter() + _INSERTION_TIMEOUT
 
@@ -159,27 +159,34 @@ class _InsertSession:
 
         self.__insertion_toplevel_hwnd = self.__gui_thread_info.hwndActive
         self.__insertion_hwnd = self.__get_insertion_hwnd(False)
+        #i Keyboard input may instead effectively go to yet a different menu window, owned by the top-level window, even though it's not reported as active or focused. It can be a Win32 menu window or from various UI frameworks.
 
         active_window = ui.active_window()
         if wapi.cast("HWND", active_window.id) != self.__insertion_toplevel_hwnd:
             raise RuntimeError(f"Talon and utilized WinAPI disagree about active window during text insertion. Talon: `{active_window}` (ID 0x{active_window.id:X}). `GUITHREADINFO.hwndActive`: {self.__insertion_toplevel_hwnd}.")
 
-        # Limit insertion if menu active.
-        if self.__gui_thread_info.flags & (win32con.GUI_SYSTEMMENUMODE | win32con.GUI_INMENUMODE | win32con.GUI_POPUPMENUMODE):
-            self.__menu_active_at_start = True
-            if len(text) > 1:
-                raise RuntimeError("Received more than one character to insert while menu is active. Text insertion aborted.")
-        #i See also `__flush_queue()`.
+        # Limit insertion if Win32 menu active.
+        if (
+            self.__gui_thread_info.flags
+            & (
+                win32con.GUI_SYSTEMMENUMODE
+                | win32con.GUI_INMENUMODE
+                | win32con.GUI_POPUPMENUMODE
+            )
+            #i This check only covers traditional Win32 menus incl. windows' system menus. The universal way would be to check whether `talon.windows.ax.get_focused_element().control_type` is `"MenuBar"` or `"MenuItem"`. But unfortunately, this API is very slow and would introduce a delay of up to about 83 ms, according to the author's measurements.
+            and len(text) > 1
+        ):
+            raise RuntimeError("Received more than one character to insert while menu is active. Text insertion aborted.")
 
-        # Create event queue.
-        CODE_UNITS_PER_FLUSH_HINT = 50
-        capacity = (CODE_UNITS_PER_FLUSH_HINT + 1) * 2
-        #i One more, because a surrogate pair can lie on the edge and they're enqueued atomically. Down and up for every code unit.
-        self.__events = wapi.new("INPUT[]", capacity)
-        self.__num_events = 0
+        # Set up win event trackers.
+        self.__interference_tracker = WinEventTracker(
+            Subfilter(
+                slice(WinEvent.SYSTEM_MENUSTART, WinEvent.SYSTEM_MENUPOPUPEND),
+                #i Can be somewhat out of order (seen in Firefox v149 with persistent menu bar). The Microsoft docs also talk about this to some degree.
+            ),
+        )
 
-        # Send events batchwise.
-        with (
+        caret_tracker = (
             WinEventTracker(
                 Subfilter(
                     # Most apps.
@@ -198,6 +205,7 @@ class _InsertSession:
                 ),
                 inclusive_ancestor_hwnd=int(wapi.cast("uintptr_t", self.__insertion_toplevel_hwnd)),
                 timeout=_INSERTION_TIMEOUT,
+                #i Note that apps' UIs and their signaling of win events may not be in sync. E.g., in VS Code v1.109.5, the sent text may already be presented while `OBJECT_LOCATIONCHANGE` events continue to arrive for a moment, making caret waits appear longer. In Notepad of Windows 11 Home 25H2, the arrival of win events may already have ceased while text still continues to appear, visually smoothing out caret waits that were actually longer than they appeared to be. (Printing on win event reception is better than using AccEvent to understand this effect.)
             )
             if (
                 self.__caret_still_duration
@@ -210,16 +218,24 @@ class _InsertSession:
                     or self.__must_wait_at_end
                 )
             )
-            else nullcontext()
-            as caret_tracker
-            #i Note that apps' UIs and their signaling of win events may not be in sync. E.g., in VS Code v1.109.5, the sent text may already be presented while `OBJECT_LOCATIONCHANGE` events continue to arrive for a moment, making caret waits appear longer. In Notepad of Windows 11 Home 25H2, the arrival of win events may already have ceased while text still continues to appear, visually smoothing out caret waits that were actually longer than they appeared to be. (Printing on win event reception is better than using AccEvent to understand this effect.)
-        ):
-            WAITING_EVENTS = (
-                WinEvent.OBJECT_LOCATIONCHANGE,
-                WinEvent.OBJECT_TEXTSELECTIONCHANGED,
-                WinEvent.OBJECT_VALUECHANGE,
-            )
+            else None
+        )
 
+        WAITING_EVENTS = (
+            WinEvent.OBJECT_LOCATIONCHANGE,
+            WinEvent.OBJECT_TEXTSELECTIONCHANGED,
+            WinEvent.OBJECT_VALUECHANGE,
+        )
+
+        # Create event queue.
+        CODE_UNITS_PER_FLUSH_HINT = 50
+        capacity = (CODE_UNITS_PER_FLUSH_HINT + 1) * 2
+        #i One more, because a surrogate pair can lie on the edge and they're enqueued atomically. Down and up for every code unit.
+        self.__events = wapi.new("INPUT[]", capacity)
+        self.__num_events = 0
+
+        # Send events batchwise.
+        with self.__interference_tracker, caret_tracker or nullcontext():
             did_enqueue = False
             had_supp_char = False
 
@@ -261,7 +277,7 @@ class _InsertSession:
                 # Wait.
                 if (
                     did_enqueue
-                    and self.__caret_still_duration
+                    and caret_tracker
                     and (
                         (self.__must_wait_before_supp_char and not had_supp_char and is_supp_char)
                         or must_wait_before_vk
@@ -295,7 +311,7 @@ class _InsertSession:
             # Final batch.
             must_wait = (
                 did_enqueue
-                and self.__caret_still_duration
+                and caret_tracker
                 and self.__must_wait_at_end
                 and self.__num_events > 1
                 #i A single event must be an up-event, and waiting for an up-event shouldn't be necessary, because apps generally only insert characters on down-events.
@@ -379,7 +395,6 @@ class _InsertSession:
         if self.__num_events <= 0:
             return
 
-        #TODO: Use `WinEventTracker.had()` to check whether the menu was focused (or focus in general was changed) since the last `SendInput()` call.
         # Check for various obstacles.
         self.__fill_gui_thread_info()
 
@@ -387,10 +402,13 @@ class _InsertSession:
         if insertion_hwnd != self.__insertion_hwnd:
             raise RuntimeError(f"Window changed during text insertion. Insertion aborted. Original: `{self.__insertion_hwnd}`. Displacing: `{insertion_hwnd}`.")
 
-        menu_active = self.__gui_thread_info.flags & (win32con.GUI_SYSTEMMENUMODE | win32con.GUI_INMENUMODE | win32con.GUI_POPUPMENUMODE)
-        if not self.__menu_active_at_start and menu_active:
-            raise RuntimeError("Menu appeared. Text insertion aborted.")
-        #i This technique only works for traditional Win32 menus incl. a window's system menu. The universal way would be to check whether `talon.windows.ax.get_focused_element().control_type` is `"MenuBar"` or `"MenuItem"`. But unfortunately, this API is very slow and would introduce a delay of up to about 83 ms before most flushes, according to the author's measurements.
+        if self.__interference_tracker.had((
+            WinEvent.SYSTEM_MENUSTART,
+            WinEvent.SYSTEM_MENUEND,
+            WinEvent.SYSTEM_MENUPOPUPSTART,
+            WinEvent.SYSTEM_MENUPOPUPEND,
+        )):
+            raise RuntimeError("Menu state changed. Text insertion aborted.")
 
         if self.__gui_thread_info.flags & win32con.GUI_INMOVESIZE:
             raise RuntimeError("Window is being moved or resized. Text insertion aborted.")
@@ -407,7 +425,7 @@ class _InsertSession:
         #i `SendInput()` can take a considerable amount of time (like > 1 s for long text). Its return time seems to correlate with the time where the foreground thread's message queue already received the events or will receive them briefly after (not guaranteed though). After that, text display can lag significantly as the app processes the messages in its queue (e.g., in Notepad and gImageReader).
 
         if num_events_sent != self.__num_events:
-            # Emergency key-up. (Only as long as modifiers aren't involved additionally.)
+            # Best-effort emergency key-up. (Only as long as modifiers aren't involved additionally.)
             try:
                 event = self.__events[num_events_sent - 1]
             except IndexError:
@@ -418,7 +436,7 @@ class _InsertSession:
                 time.sleep(0.1)  # Failure may just be transient.
 
                 event.DUMMYUNIONNAME.ki.dwFlags |= win32con.KEYEVENTF_KEYUP
-                success = user32.SendInput(1, wapi.addressof(event), wapi.sizeof("INPUT"))  # Only best effort.
+                success = user32.SendInput(1, wapi.addressof(event), wapi.sizeof("INPUT"))
                 if not success:
                     extra_message = " Emergency key-up also failed."
 

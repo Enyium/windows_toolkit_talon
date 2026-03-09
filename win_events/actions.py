@@ -51,6 +51,7 @@ class _Actions:
                     WinEvent.OBJECT_FOCUS,
                     object_id_is_custom=True,
                 ),
+                #i Unfortunately, `OBJECT_FOCUS` events also happen when just hovering over menu *bar* items with the mouse in at least the UI frameworks Chrome, Gecko and Qt. At least in Gecko, this also applies when the window isn't even active. Going by the behavior of Win32 apps, the correct way would be to only send the event on mouse-enter when the arrow keys would also change the selection, like after pressing Alt. (Qt also goes haywire when hovering over menu items [not of menu *bars*], sending the event on every mouse-move.) If a workaround is needed, `Role.MENUITEM` could be excluded; although this would go a little too far.
                 Subfilter(
                     # E.g., VS Code v1.109.5.
                     WinEvent.OBJECT_LOCATIONCHANGE,
