@@ -27,17 +27,10 @@ class _Actions:
             user.wait_for_focus()
         """
 
-        global _tracker, _tracker_cleanup_job
+        global _tracker
 
         with _lock:
-            cron.cancel(_tracker_cleanup_job)
-            _tracker_cleanup_job = None
-
-            if _tracker:
-                try:
-                    _tracker.__exit__()
-                finally:
-                    _tracker = None
+            _clean_up_tracker()
 
             _tracker = WinEventTracker(
                 Subfilter(
@@ -63,55 +56,34 @@ class _Actions:
                 # ),
                 inclusive_ancestor_hwnd=ui.active_window().id,
             )
-
-            _tracker_cleanup_job = cron.after("5s", _on_tracker_cleanup_job)  # Timeout reflected in docstring.
-            _tracker.__enter__()
+            _start_tracker()
 
     #TODO: To be usable everywhere, the signature needs a mandatory fallback duration as first parameter (time spec string?). Then, default actions can be implemented where `track_focus()` is a no-op and `wait_for_focus()` just sleeps for the default duration.
     def wait_for_focus(timeout: float = 1.0):
         """Waits until a UI element seems to have acquired focus. You must have called `user.track_focus()` first.
 
-        Raises an exception on timeout. There's an additional non-configurable 5-second timeout after which tracking is automatically aborted.
+        Raises an exception on timeout. There's an additional non-configurable few-second timeout after which tracking is automatically aborted if this action isn't called.
         """
 
-        global _tracker, _tracker_cleanup_job
+        global _tracker
 
         with _lock:
             if not _tracker:
                 raise RuntimeError("Can't wait for focus without ongoing tracking.")
 
-            cron.cancel(_tracker_cleanup_job)
-            _tracker_cleanup_job = None
-
-            tracker = _tracker
-            _tracker = None
+            active_tracker = _tracker
+            _clean_up_tracker(False)
 
         try:
-            tracker.require(
+            active_tracker.require(
                 (WinEvent.OBJECT_FOCUS, WinEvent.OBJECT_LOCATIONCHANGE),
                 timeout=timeout,
             )  # May raise `TimeoutError`.
         finally:
-            tracker.__exit__()
-
-    def private_test_wait_for_focus():
-        """Test for the `user.wait_for_focus()` action."""
-
-        import time
-
-        print("Tracking focus.")
-        actions.user.track_focus()
-
-        #i You can optionally insert focus-acquiring code here.
-
-        start_time = time.perf_counter()
-        actions.user.wait_for_focus(timeout=3)
-        waiting_duration = time.perf_counter() - start_time
-
-        print(f"Successfully waited for focus. Duration: {waiting_duration * 1000:.3f} ms.")
+            active_tracker.__exit__()
 
     def private_test_win_event_tracker():
-        """Test for the `WinEventTracker` class."""
+        """Simple test for the `WinEventTracker` class."""
 
         caret_tracker = WinEventTracker(
             Subfilter(
@@ -139,15 +111,47 @@ class _Actions:
 
             print("Done waiting.")
 
+    def private_test_wait_for_focus():
+        """Test for the `user.wait_for_focus()` action."""
+
+        import time
+
+        print("Tracking focus.")
+        actions.user.track_focus()
+
+        #i You can optionally insert focus-acquiring code here.
+
+        start_time = time.perf_counter()
+        actions.user.wait_for_focus(timeout=3)
+        waiting_duration = time.perf_counter() - start_time
+
+        print(f"Successfully waited for focus. Duration: {waiting_duration * 1000:.3f} ms.")
+
+
+def _start_tracker():
+    """The caller is responsible for locking."""
+
+    global _tracker_cleanup_job, _tracker
+    _tracker_cleanup_job = cron.after("5s", _on_tracker_cleanup_job)
+    _tracker.__enter__()
+
+def _clean_up_tracker(may_exit_context: bool = True):
+    """The caller is responsible for locking."""
+
+    global _tracker_cleanup_job, _tracker
+
+    cron.cancel(_tracker_cleanup_job)
+    _tracker_cleanup_job = None
+
+    if _tracker:
+        try:
+            if may_exit_context:
+                _tracker.__exit__()
+        finally:
+            _tracker = None
 
 def _on_tracker_cleanup_job():
-    global _tracker, _tracker_cleanup_job
-
+    global _tracker_cleanup_job
     with _lock:
         _tracker_cleanup_job = None
-
-        if _tracker:
-            try:
-                _tracker.__exit__()
-            finally:
-                _tracker = None
+        _clean_up_tracker()
