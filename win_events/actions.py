@@ -1,13 +1,24 @@
 from threading import Lock
-from typing import Optional
+from typing import Optional, Sequence, Union
 
-from talon import actions, cron, Module, ui
+from talon import actions, Context, cron, Module, settings, ui
 from talon.cron import Job
 
 from .constants import WinEvent, ObjectID
 from .tracker import Subfilter, WinEventTracker
 
 _mod = Module()
+_mod.setting(
+    "si_tracking__waiting_timeout",
+    type=float,
+    default=1.0,
+    desc="Seconds after which the `user.wait_for_...()` actions raise a `TimeoutError`. Note that there's an additional non-configurable few-second timeout after which tracking is automatically aborted if a call to `user.track_...()` isn't matched by a call to `user.wait_for_...()`.",
+)
+
+_ctx = Context()
+_ctx.matches = """
+os: windows
+"""
 
 _lock = Lock()
 _tracker: Optional[WinEventTracker] = None
@@ -24,9 +35,18 @@ class _Actions:
 
             user.track_focus()
             user.your_focus_action()
-            user.wait_for_focus()
+            user.wait_for_focus(100ms)
         """
 
+    def wait_for_focus(fixed_fallback_duration: Union[float, str]):
+        """Waits until a UI element seems to have acquired focus. You must have called `user.track_focus()` first."""
+
+        actions.sleep(fixed_fallback_duration)
+
+
+@_ctx.action_class("user")
+class _UserActions:
+    def track_focus():
         global _tracker
 
         with _lock:
@@ -58,31 +78,13 @@ class _Actions:
             )
             _start_tracker()
 
-    #TODO: To be usable everywhere, the signature needs a mandatory fallback duration as first parameter (time spec string?). Then, default actions can be implemented where `track_focus()` is a no-op and `wait_for_focus()` just sleeps for the default duration.
-    def wait_for_focus(timeout: float = 1.0):
-        """Waits until a UI element seems to have acquired focus. You must have called `user.track_focus()` first.
+    def wait_for_focus(fixed_fallback_duration: Union[float, str]):
+        _wait_for((WinEvent.OBJECT_FOCUS, WinEvent.OBJECT_LOCATIONCHANGE))
 
-        Raises an exception on timeout. There's an additional non-configurable few-second timeout after which tracking is automatically aborted if this action isn't called.
-        """
 
-        global _tracker
-
-        with _lock:
-            if not _tracker:
-                raise RuntimeError("Can't wait for focus without ongoing tracking.")
-
-            active_tracker = _tracker
-            _clean_up_tracker(False)
-
-        try:
-            active_tracker.require(
-                (WinEvent.OBJECT_FOCUS, WinEvent.OBJECT_LOCATIONCHANGE),
-                timeout=timeout,
-            )  # May raise `TimeoutError`.
-        finally:
-            active_tracker.__exit__()
-
-    def private_test_win_event_tracker():
+@_mod.action_class
+class _TestActions:
+    def private_si_test_win_event_tracker():
         """Simple test for the `WinEventTracker` class."""
 
         caret_tracker = WinEventTracker(
@@ -111,7 +113,7 @@ class _Actions:
 
             print("Done waiting.")
 
-    def private_test_wait_for_focus():
+    def private_si_test_wait_for_focus():
         """Test for the `user.wait_for_focus()` action."""
 
         import time
@@ -122,7 +124,7 @@ class _Actions:
         #i You can optionally insert focus-acquiring code here.
 
         start_time = time.perf_counter()
-        actions.user.wait_for_focus(timeout=3)
+        actions.user.wait_for_focus("100ms")
         waiting_duration = time.perf_counter() - start_time
 
         print(f"Successfully waited for focus. Duration: {waiting_duration * 1000:.3f} ms.")
@@ -134,6 +136,24 @@ def _start_tracker():
     global _tracker_cleanup_job, _tracker
     _tracker_cleanup_job = cron.after("5s", _on_tracker_cleanup_job)
     _tracker.__enter__()
+
+def _wait_for(win_events: Union[WinEvent, Sequence[WinEvent]]):
+    global _tracker
+
+    with _lock:
+        if not _tracker:
+            raise RuntimeError("Can't wait without ongoing tracking.")
+
+        active_tracker = _tracker
+        _clean_up_tracker(False)
+
+    try:
+        active_tracker.require(
+            win_events,
+            timeout=settings.get("user.si_tracking__waiting_timeout"),
+        )  # May raise `TimeoutError`.
+    finally:
+        active_tracker.__exit__()
 
 def _clean_up_tracker(may_exit_context: bool = True):
     """The caller is responsible for locking."""
@@ -151,7 +171,12 @@ def _clean_up_tracker(may_exit_context: bool = True):
             _tracker = None
 
 def _on_tracker_cleanup_job():
-    global _tracker_cleanup_job
+    global _tracker, _tracker_cleanup_job
+
     with _lock:
+        had_tracker = _tracker is not None
         _tracker_cleanup_job = None
         _clean_up_tracker()
+
+    if had_tracker:
+        raise RuntimeError("Tracking aborted because waiting was never initiated.")
