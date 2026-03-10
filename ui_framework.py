@@ -85,7 +85,6 @@ class UIFramework(StrCarryingOneBasedIntEnum):
     """- Also reported as such by UI Automation API
     - Apps: Firefox, Firefox derivates, Thunderbird, Zotero"""
 
-    #TODO: Use GDK instead of GTK, because it's about event loop matters and automation? (Similar to AWT for Swing, and WinRT XAML for WinUI 3 etc.)
     GTK = "GTK"
     """- Originally "GIMP Toolkit"
     - Apps: Inkscape, Qalculate (one variant), Czkawka"""
@@ -506,7 +505,7 @@ class _Detector:
                 wapi.cast("HWND", toplevel_window.id),
                 user32.GWLP_HINSTANCE
             )
-            if window_module_handle == 0:
+            if not window_module_handle:
                 last_error = kernel32.GetLastError()
                 if last_error:
                     raise ctypes.WinError(last_error)
