@@ -155,10 +155,10 @@ class _InsertSession:
         self.__deadline = time.perf_counter() + _INSERTION_TIMEOUT
 
         # Establish windows.
-        self.__fill_gui_thread_info()
+        self.__fill_gui_thread_info(may_retry=True)
 
         self.__insertion_toplevel_hwnd = self.__gui_thread_info.hwndActive
-        self.__insertion_hwnd = self.__get_insertion_hwnd(False)
+        self.__insertion_hwnd = self.__get_insertion_hwnd(self.__gui_thread_info)
         #i Keyboard input may instead effectively go to yet a different menu window, owned by the top-level window, even though it's not reported as active or focused. It can be a Win32 menu window or from various UI frameworks.
 
         #TODO: WITH TALON AUTHOR: The disagreement happens regularly, like when saying "sway word bar" (with Notepad as 2nd window and "sway" waiting for `WinEvent.SYSTEM_FOREGROUND`), even though `GetForegroundWindow()` and `GetGUIThreadInfo(0, …)` return the correct target window (Notepad). Perhaps, `ui.active_window()` should call `GetForegroundWindow()` every time (and possibly only build or retrieve a `Window` object on HWND changes).
@@ -399,7 +399,7 @@ class _InsertSession:
         # Check for various obstacles.
         self.__fill_gui_thread_info()
 
-        insertion_hwnd = self.__get_insertion_hwnd()
+        insertion_hwnd = self.__get_insertion_hwnd(self.__gui_thread_info)
         if insertion_hwnd != self.__insertion_hwnd:
             raise RuntimeError(f"Window changed during text insertion. Insertion aborted. Original HWND: `{self.__insertion_hwnd}`. Displacing HWND: `{insertion_hwnd}`.")
 
@@ -447,26 +447,28 @@ class _InsertSession:
         # Reset event queue with regard to next flush.
         self.__num_events = 0
 
-    def __fill_gui_thread_info(self):
-        """Fetches the `GUITHREADINFO` for the current foreground thread and saves it in the instance."""
+    def __fill_gui_thread_info(self, may_retry: bool = False):
+        """Fetches the `GUITHREADINFO` for the current foreground thread and saves it in the instance. Optionally retries repeatedly until a brief timeout elapsed to compensate for window activation in progress (observed null window handle when closing Notepad)."""
 
-        success = user32.GetGUIThreadInfo(0, self.__gui_thread_info)
-        if not success:
-            raise ctypes.WinError(kernel32.GetLastError())
+        deadline = time.perf_counter() + 0.050 if may_retry else None
+        while True:
+            success = user32.GetGUIThreadInfo(0, self.__gui_thread_info)
+            if not success:
+                raise ctypes.WinError(kernel32.GetLastError())
 
-    def __get_insertion_hwnd(self, is_inserting: bool = True) -> CType:
-        """Checks and retrieves the specific `HWND` from the current `GUITHREADINFO` that'll also receive the `SendInput()` events from the OS."""
+            if self.__gui_thread_info.hwndActive:
+                return
+            elif not may_retry or time.perf_counter() >= deadline:
+                raise RuntimeError("No active window during text insertion.")
 
-        hwnd = self.__gui_thread_info.hwndFocus or self.__gui_thread_info.hwndActive
+            time.sleep(0.005)
+
+    def __get_insertion_hwnd(self, gui_thread_info: CType) -> CType:
+        """Retrieves the specific `HWND` that'll also receive the `SendInput()` events from the OS."""
+
+        return gui_thread_info.hwndFocus or gui_thread_info.hwndActive
         #i - `hwndActive` is always a top-level window.
+        #i - `hwndFocus` can be `NULL` - like directly after launching Notepad.
         #i - For classical Win32 apps, `hwndFocus` is a control.
         #i - For UWP apps, which are hosted by `ApplicationFrameHost.exe`, `hwndActive` is the hosting top-level window from said .exe, and `hwndFocus` is the child window from the actual app process (another .exe) that renders the window's client area etc.
         #i - Some (many?) UI frameworks don't use Win32 child windows and both handles are the same.
-
-        if hwnd == wapi.NULL:
-            raise RuntimeError(
-                "Missing window during text insertion."
-                + (" Insertion aborted." if is_inserting else "")
-            )
-
-        return hwnd
