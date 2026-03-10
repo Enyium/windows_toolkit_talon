@@ -6,6 +6,7 @@ import ctypes
 from enum import Enum, auto
 import re
 import textwrap
+from threading import Lock
 import time
 import traceback
 from typing import Callable, Optional, TYPE_CHECKING
@@ -40,6 +41,7 @@ _MAY_ABORT_CHILD_WINDOW_LOOP_EARLY = True
 """Whether the child window loop may be aborted as soon as a UI framework hint was found. As a side effect, if different UI framework hints are present in the child window tree, this may change which one applies."""
 
 _script_load_time_ns = time.perf_counter_ns()
+_lock = Lock()
 _mod = Module()
 
 
@@ -173,13 +175,15 @@ def _script_main():
     ui.register("win_focus", _on_win_focus)
 
 def _on_ready():
-    toplevel_window = ui.active_window()
-    if toplevel_window.id != -1:  # Guard against Talon launch.
-        _update_scope(toplevel_window)
+    with _lock:
+        toplevel_window = ui.active_window()
+        if toplevel_window.id != -1:  # Guard against Talon launch.
+            _update_scope(toplevel_window)
 
 def _on_win_focus(toplevel_window: Window):
-    _abort_retry()
-    _update_scope(toplevel_window)
+    with _lock:
+        _abort_retry()
+        _update_scope(toplevel_window)
 
 def _schedule_retry(window: Window):
     """Schedules a retry of assessing the UI framework after a short duration. Raises an exception if a timeout was reached.
@@ -210,7 +214,8 @@ def _abort_retry():
     _retry_window = None
 
 def _on_retry_job():
-    _update_scope(_retry_window)
+    with _lock:
+        _update_scope(_retry_window)
 
 def _update_scope(toplevel_window: Window):
     global _framework
