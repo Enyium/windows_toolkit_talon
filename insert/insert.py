@@ -161,9 +161,10 @@ class _InsertSession:
         self.__insertion_hwnd = self.__get_insertion_hwnd(False)
         #i Keyboard input may instead effectively go to yet a different menu window, owned by the top-level window, even though it's not reported as active or focused. It can be a Win32 menu window or from various UI frameworks.
 
-        active_window = ui.active_window()
-        if wapi.cast("HWND", active_window.id) != self.__insertion_toplevel_hwnd:
-            raise RuntimeError(f"Talon and utilized WinAPI disagree about active window during text insertion. Talon: `{active_window}` (ID 0x{active_window.id:X}). `GUITHREADINFO.hwndActive`: {self.__insertion_toplevel_hwnd}.")
+        #TODO: WITH TALON AUTHOR: The disagreement happens regularly, like when saying "sway word bar" (with Notepad as 2nd window and "sway" waiting for `WinEvent.SYSTEM_FOREGROUND`), even though `GetForegroundWindow()` and `GetGUIThreadInfo(0, …)` return the correct target window (Notepad). Perhaps, `ui.active_window()` should call `GetForegroundWindow()` every time (and possibly only build or retrieve a `Window` object on HWND changes).
+        # active_window = ui.active_window()
+        # if wapi.cast("HWND", active_window.id) != self.__insertion_toplevel_hwnd:
+        #     raise RuntimeError(f"Talon and utilized WinAPI disagree about active window during text insertion. Talon: `{active_window}` (ID 0x{active_window.id:X}). `GUITHREADINFO.hwndActive`: {self.__insertion_toplevel_hwnd}.")
 
         # Limit insertion if Win32 menu active.
         if (
@@ -400,7 +401,7 @@ class _InsertSession:
 
         insertion_hwnd = self.__get_insertion_hwnd()
         if insertion_hwnd != self.__insertion_hwnd:
-            raise RuntimeError(f"Window changed during text insertion. Insertion aborted. Original: `{self.__insertion_hwnd}`. Displacing: `{insertion_hwnd}`.")
+            raise RuntimeError(f"Window changed during text insertion. Insertion aborted. Original HWND: `{self.__insertion_hwnd}`. Displacing HWND: `{insertion_hwnd}`.")
 
         if self.__interference_tracker.had((
             WinEvent.SYSTEM_MENUSTART,
@@ -460,7 +461,7 @@ class _InsertSession:
         #i - `hwndActive` is always a top-level window.
         #i - For classical Win32 apps, `hwndFocus` is a control.
         #i - For UWP apps, which are hosted by `ApplicationFrameHost.exe`, `hwndActive` is the hosting top-level window from said .exe, and `hwndFocus` is the child window from the actual app process (another .exe) that renders the window's client area etc.
-        #i - For some (many?) UI frameworks without Win32 child windows, both handles are the same.
+        #i - Some (many?) UI frameworks don't use Win32 child windows and both handles are the same.
 
         if hwnd == wapi.NULL:
             raise RuntimeError(
