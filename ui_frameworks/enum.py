@@ -1,4 +1,4 @@
-from ..lib.str_carrying_one_based_int_enum import StrCarryingOneBasedIntEnum
+from ..lib.str_int_enum import StrCarryingOneBasedIntEnum
 
 class UIFramework(StrCarryingOneBasedIntEnum):
     # Special variants.
