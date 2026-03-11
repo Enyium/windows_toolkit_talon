@@ -1,5 +1,7 @@
 """
-This file makes the `user.ui_framework` Talon scope available that can be used for window matching. See the `UIFramework` enum for possible string values. The assessments are cached in the windows themselves using window properties. Whenever Talon reloads this file, the assessments are reset (without removing the window properties).
+This file makes the `user.ui_framework` Talon scope available that can be used for context matching. See the separate `UIFramework` enum for possible string values.
+
+The assessments are cached in the windows themselves using window properties. Whenever Talon reloads this file, the assessments are reset (without removing the window properties).
 """
 
 import ctypes
@@ -14,7 +16,7 @@ from typing import Callable, Optional, TYPE_CHECKING
 from talon import Module, app, cron, ui
 from talon.ui import Window
 
-from .lib.str_carrying_one_based_int_enum import StrCarryingOneBasedIntEnum
+from .enum import UIFramework
 
 if app.platform == "windows" or TYPE_CHECKING:
     import pywintypes
@@ -26,11 +28,11 @@ if app.platform == "windows" or TYPE_CHECKING:
 
     from talon.windows import ax
 
-    from .lib.winapi import kernel32, user32, w, wapi
+    from ..lib.winapi import kernel32, user32, w, wapi
 else:
     raise NotImplementedError("Unsupported OS.")
 
-#. Debug flags.
+# Debug flags.
 _MUST_LOG_ASSESSMENT = False
 """Whether the UI framework assessment should be printed to Talon's log after every window activation (may be read from cache)."""
 _MUST_CACHE_ASSESSMENT = True
@@ -40,105 +42,14 @@ _MUST_LOG_CHILD_WINDOWS = False
 _MAY_ABORT_CHILD_WINDOW_LOOP_EARLY = True
 """Whether the child window loop may be aborted as soon as a UI framework hint was found. As a side effect, if different UI framework hints are present in the child window tree, this may change which one applies."""
 
-_script_load_time_ns = time.perf_counter_ns()
+# Synchronization.
 _lock = Lock()
-_mod = Module()
 
+# Assessment.
+_framework = UIFramework.PENDING
+"""Last assessment for communication with Talon scope."""
 
-class UIFramework(StrCarryingOneBasedIntEnum):
-    # Special variants.
-    UNKNOWN = "unknown"
-    """No specific framework could be detected. Probably something like bare Win32, or a custom-drawing framework that doesn't leave any hints about it."""
-
-    PENDING = "pending"
-    """The framework couldn't be detected right away on window activation, so a number of retries are undertaken until a timeout occurs."""
-
-    ERROR = "error"
-    """The detection code produced an exception that was logged in Talon's log. Allows for slow-input fallbacks."""
-
-    # Concrete UI frameworks.
-    @property
-    def is_concrete(self) -> bool:
-        return self > UIFramework.ERROR
-
-    ATL = "ATL"
-    """- Active Template Library (C++)
-    - Apps: Autoruns"""
-
-    AUTO_HOTKEY = "AutoHotkey"
-    """Apps: Window Spy for AHKv2"""
-
-    AWT = "AWT"
-    """- Abstract Window Toolkit, typically in combination with Swing (Java)
-    - Apps: Android Studio, Swing App Example, ImageJ, SINE Isochronic Entrainer"""
-
-    CHROME = "Chrome"
-    """- Also reported as such by UI Automation API
-    - Apps: Chrome, Chromium derivates, Electron apps"""
-
-    CLASSIC_VISUAL_BASIC = "classic Visual Basic"
-    """Apps: [CharProbe](https://web.archive.org/web/20130312122416/http://www.dextronet.com/charprobe), [Color Selector](https://colorselector.sourceforge.net)"""
-
-    FLUTTER = "Flutter"
-
-    GECKO = "Gecko"
-    """- Also reported as such by UI Automation API
-    - Apps: Firefox, Firefox derivates, Thunderbird, Zotero"""
-
-    GTK = "GTK"
-    """- Originally "GIMP Toolkit"
-    - Apps: Inkscape, Qalculate (one variant), Czkawka"""
-
-    JAVA_FX = "JavaFX"
-    """Apps: AsciidocFX, PDFsam Basic"""
-
-    MFC = "MFC"
-    """- Microsoft Foundation Classes (C++)
-    - Apps:
-      - NVIDIA Control Panel, O&O RegEditor, PDFill PDF Tools
-      - MPC-HC"""
-
-    QT = "Qt"
-    """Apps: Equalizer APO, SQLiteStudio, XnConvert"""
-
-    SWT = "SWT"
-    """- Standard Widget Toolkit (Java)
-    - Apps: Eclipse IDE"""
-
-    VISUAL_CLASS_LIBRARY = "Visual Class Library"
-    """- (C++)
-    - Not to be confused with "Visual Component Library"
-    - Apps: LibreOffice, Apache OpenOffice"""
-
-    VISUAL_COMPONENT_LIBRARY = "Visual Component Library"
-    """- (mainly Delphi)
-    - Not to be confused with "Visual Class Library"
-    - Apps: Balabolka, HxD, [Billy](https://github.com/zQueal/Billy), HDDScan"""
-
-    WIN_FORMS = "WinForms"
-    """- Windows Forms (.NET)
-    - Apps: Shutdown Timer Classic, AS SSD Benchmark"""
-
-    WINRT_XAML = "WinRT XAML"
-    """Apps:
-    - UWP XAML:
-      - Windows taskbar's start and search flyouts
-      - Microsoft apps shipped with Windows, hosted by `ApplicationFrameHost.exe`, like Clock, Feedback Hub, Media Player
-    - XAML Islands:
-      - Windows Alt+Tab task switcher
-    - WinUI 3:
-      - Microsoft PowerToys
-      - Microsoft apps shipped with Windows, not hosted by `ApplicationFrameHost.exe`, like Notepad, Paint"""
-
-    WPF = "WPF"
-    """- Windows Presentation Foundation (.NET)
-    - Apps: Visual Studio Installer, Visual Studio, Accessibility Insights for Windows, ILSpy"""
-
-    WX_WIDGETS = "wxWidgets"
-    """Apps: Tenacity, HTerm"""
-
-
-#. Win32 class names.
+# # Win32 class names.
 _mfc_class_regex = re.compile(r"^Afx[:A-Z]")
 _qt_class_regex = re.compile(r"^(?:Qt\d+QWindowIcon|QWidget)$")
 _visual_component_library_class_regex = re.compile(r"""(?x)
@@ -155,19 +66,23 @@ _WINRT_XAML_CHILD_CLASSES = frozenset((
     "Microsoft.UI.Content.DesktopChildSiteBridge",
 ))
 
-#. Filenames of loaded modules (DLLs). (Input is lowercased.)
+# # Filenames of loaded modules (DLLs). (Input is lowercased.)
 _gtk_dll_regex = re.compile(r"^libgtk-[\d.-]+\.dll$")
 
-_FRAMEWORK_INT_PROP_NAME = w("Talon.SmartInput.UIFramework")
-_ASSESSMENT_TIME_NS_PROP_NAME = w("Talon.SmartInput.UIFramework.AssessmentTimeNS")
-
-_framework = UIFramework.PENDING
-"""Last assessment for communication with Talon scope."""
-
+# Pending-state resolution.
 _retry_job = None
 _retry_start = 0
 _retry_window = None
 
+# Caching.
+_script_load_time_ns = time.perf_counter_ns()
+_FRAMEWORK_INT_PROP_NAME = w("Talon.SmartInput.UIFramework")
+_ASSESSMENT_TIME_NS_PROP_NAME = w("Talon.SmartInput.UIFramework.AssessmentTimeNS")
+
+# Talon bridge.
+_mod = Module()
+
+#
 def _script_main():
     _ui_framework_scope.update()
     app.register("ready", _on_ready)
@@ -184,7 +99,7 @@ def _on_win_focus(toplevel_window: Window):
         _abort_retry()
         _update_scope(toplevel_window)
 
-def _schedule_retry(window: Window):
+def _schedule_retry(toplevel_window: Window):
     """Schedules a retry of assessing the UI framework after a short duration. Raises an exception if a timeout was reached.
 
     This function changes global state.
@@ -203,7 +118,7 @@ def _schedule_retry(window: Window):
     else:  # Just starting out.
         _retry_start = time.perf_counter()
 
-    _retry_window = window
+    _retry_window = toplevel_window
     _retry_job = cron.after("100ms", _on_retry_job)
 
 def _abort_retry():
@@ -249,7 +164,11 @@ class _Detector:
     def __call__(self, toplevel_window: Window) -> UIFramework:
         return self.__check_cache_and_toplevel_window(toplevel_window, _schedule_retry)
 
-    def __check_cache_and_toplevel_window(self, toplevel_window: Window, schedule_retry_or_noop: Callable[[Window], None]) -> UIFramework:
+    def __check_cache_and_toplevel_window(
+        self,
+        toplevel_window: Window,
+        schedule_retry_or_noop: Callable[[Window], None],
+    ) -> UIFramework:
         """Reads the top-level window's UI framework from its window properties, or tries to recognize it."""
 
         # Read cached assessment, if available.
@@ -307,7 +226,11 @@ class _Detector:
 
         return framework
 
-    def __check_toplevel_window(self, toplevel_window: Window, schedule_retry_or_noop: Callable[[Window], None]) -> UIFramework:
+    def __check_toplevel_window(
+        self,
+        toplevel_window: Window,
+        schedule_retry_or_noop: Callable[[Window], None],
+    ) -> UIFramework:
         """Tries to recognize the top-level window's UI framework."""
 
         class ExtraSource(Enum):
@@ -411,7 +334,11 @@ class _Detector:
 
         return framework
 
-    def __check_child_window_tree(self, toplevel_window: Window, possible_frameworks: Optional[set[UIFramework]] = None) -> UIFramework:
+    def __check_child_window_tree(
+        self,
+        toplevel_window: Window,
+        possible_frameworks: Optional[set[UIFramework]] = None,
+    ) -> UIFramework:
         """Tries to recognize the top-level window's UI framework by its Win32 child window tree."""
 
         wants_mfc = possible_frameworks is None or UIFramework.MFC in possible_frameworks
@@ -489,7 +416,12 @@ class _Detector:
 
         return framework
 
-    def __check_module_filenames(self, toplevel_window: Window, possible_frameworks: Optional[set[UIFramework]] = None, wants_dialog_check: bool = False) -> tuple[UIFramework, bool]:
+    def __check_module_filenames(
+        self,
+        toplevel_window: Window,
+        possible_frameworks: Optional[set[UIFramework]] = None,
+        wants_dialog_check: bool = False,
+    ) -> tuple[UIFramework, bool]:
         """Tries to recognize the process's UI framework by its module filenames (mostly DLLs).
         
         Optionally checks whether the window was created by a Windows DLL known to create standard dialogs. If so, the second return value will be `True`. Besides the case with no such DLL, if a hint for a desired UI framework was found before encountering one of said DLLs, `False` is returned. The argument activating this check should only be set to `True` if the top-level window's class name hints towards a dialog (like `#32770`).
@@ -566,7 +498,11 @@ class _Detector:
 
         return (UIFramework.UNKNOWN, plausibly_std_dialog)
 
-    def __check_uia_data(self, toplevel_window: Window, possible_frameworks: Optional[set[UIFramework]] = None) -> UIFramework:
+    def __check_uia_data(
+        self,
+        toplevel_window: Window,
+        possible_frameworks: Optional[set[UIFramework]] = None,
+    ) -> UIFramework:
         """Tries to recognize the top-level window's UI framework by its UI Automation data."""
 
         wants_wpf = possible_frameworks is None or UIFramework.WPF in possible_frameworks
