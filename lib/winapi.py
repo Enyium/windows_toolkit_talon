@@ -1,9 +1,8 @@
 from cffi import FFI
 from typing import Optional
 
-CType = FFI.CType
-
 wapi = FFI()
+CType = wapi.CType
 
 def w(string: Optional[str]):
     return wapi.NULL if string is None else wapi.new("WCHAR[]", string)
