@@ -2,7 +2,7 @@ from cffi import FFI
 from typing import Optional
 
 wapi = FFI()
-CType = wapi.CType
+CData = wapi.CData
 
 def w(string: Optional[str]):
     return wapi.NULL if string is None else wapi.new("WCHAR[]", string)

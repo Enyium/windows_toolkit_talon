@@ -21,7 +21,7 @@ if app.platform == "windows" or TYPE_CHECKING:
     import win32gui
     import winerror
 
-    from ..lib.winapi import CType, kernel32, oleacc, user32, wapi
+    from ..lib.winapi import CData, kernel32, oleacc, user32, wapi
     from .listener import WinEventListener
     from .constants import WinEvent, Role
 else:
@@ -133,7 +133,7 @@ class WinEventTracker:
         self,
         subscription_handle: int,
         event: int,
-        hwnd: CType,
+        hwnd: CData,
         object_id: int,
         child_id: int,
         thread_id: int,

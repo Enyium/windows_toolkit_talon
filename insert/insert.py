@@ -14,7 +14,7 @@ if app.platform == "windows" or TYPE_CHECKING:
     import win32con
     import winerror
 
-    from ..lib.winapi import CType, kernel32, user32, wapi
+    from ..lib.winapi import CData, kernel32, user32, wapi
     from ..win_events.tracker import Subfilter, WinEventTracker
     from ..win_events.constants import WinEvent, ObjectID, Role
 else:
@@ -323,7 +323,7 @@ class _InsertSession:
 
             #i If unbalanced down-events were possible after flushing, an emergency key-up would be needed in an `except` block after a large `try` block.
 
-    def __yield_to_target(self, insertion_hwnd: CType):
+    def __yield_to_target(self, insertion_hwnd: CData):
         """Yields time to the target thread of the insertion.
 
         Blocks until the target thread is in its Win32 message loop again to give it time to process previous events, which may have been transferred to a UI-framework-specific message loop. This is relevant in Qt apps that tend to insert Unicode supplementary characters from later in the event stream before earlier BMP characters. It's *especially* relevant in the output pane of Qt-based gImageReader v3.4.3 where each new character initiates a text check; it's worse with longer text box contents. In Qt apps, without yielding, there can also be problems with the very first insertion of text containing supplementary characters after app start.
@@ -463,7 +463,7 @@ class _InsertSession:
 
             time.sleep(0.005)
 
-    def __get_insertion_hwnd(self, gui_thread_info: CType) -> CType:
+    def __get_insertion_hwnd(self, gui_thread_info: CData) -> CData:
         """Retrieves the specific `HWND` that'll also receive the `SendInput()` events from the OS."""
 
         return gui_thread_info.hwndFocus or gui_thread_info.hwndActive

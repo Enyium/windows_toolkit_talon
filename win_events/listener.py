@@ -15,7 +15,7 @@ if app.platform == "windows" or TYPE_CHECKING:
     import win32con
 
     from ..lib.message_loop import MessageLoopExecutor
-    from ..lib.winapi import CType, user32, wapi
+    from ..lib.winapi import CData, user32, wapi
 else:
     raise NotImplementedError("Unsupported OS.")
 
@@ -28,7 +28,7 @@ class WinEventListener:
             self,  # Just belongs to `Protocol`.
             subscription_handle: int,
             event: int,
-            hwnd: CType,
+            hwnd: CData,
             object_id: int,
             child_id: int,
             thread_id: int,
@@ -44,7 +44,7 @@ class WinEventListener:
         self.__label = f'`{WinEventListener.__name__}` with UUID "{instance_uuid4}"'
         self.__lock = RLock()
         self.__is_shut_down_event = Event()
-        self.__weak_callbacks_by_hook_handles: dict[CType, WeakCallback[WinEventListener.OnWinEventCallback]] = {}
+        self.__weak_callbacks_by_hook_handles: dict[CData, WeakCallback[WinEventListener.OnWinEventCallback]] = {}
 
         self.__executor = MessageLoopExecutor(
             instance_uuid4,
@@ -93,7 +93,7 @@ class WinEventListener:
         process_id: Optional[int],
         thread_id: Optional[int],
         on_winevent: OnWinEventCallback,
-    ) -> CType:
+    ) -> CData:
         with self.__lock:
             if self.__is_shut_down_event.is_set():
                 raise RuntimeError(f"{self.__label} already shut down.")
@@ -134,7 +134,7 @@ class WinEventListener:
 
         self.__executor.invoke(self.__unhook, wapi.cast("HWINEVENTHOOK", subscription_handle), timeout=2)
 
-    def __unhook(self, hook_handle: CType) -> None:
+    def __unhook(self, hook_handle: CData) -> None:
         with self.__lock:
             if self.__is_shut_down_event.is_set():
                 raise RuntimeError(f"{self.__label} already shut down.")
@@ -151,9 +151,9 @@ class WinEventListener:
     @wapi.callback("BARE_WINEVENTPROC")
     @staticmethod
     def __winevent_proc(
-        hWinEventHook: CType,
+        hWinEventHook: CData,
         event: int,
-        hwnd: CType,
+        hwnd: CData,
         idObject: int,
         idChild: int,
         idEventThread: int,
@@ -221,7 +221,7 @@ class WinEventListener:
     def __on_thread_exit(
         lock: Lock,
         is_shut_down_event: Event,
-        weak_callbacks_by_hook_handles: dict[CType, WeakCallback[OnWinEventCallback]],
+        weak_callbacks_by_hook_handles: dict[CData, WeakCallback[OnWinEventCallback]],
     ) -> None:
         with lock:
             if is_shut_down_event.is_set():
