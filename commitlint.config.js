@@ -7,6 +7,7 @@ export default {
     "rules": {
         "scope-enum": [ERROR, "always", [
             "commitlint",
+            "gitignore",
             "insert",
             "readme",
             "ui-frameworks",
