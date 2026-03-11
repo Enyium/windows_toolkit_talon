@@ -12,6 +12,7 @@ export default {
             "readme",
             "ui-frameworks",
             "win-events",
+            "window-patterns",
         ]],
         "body-max-line-length": [DISABLED],
         "footer-max-line-length": [DISABLED],
