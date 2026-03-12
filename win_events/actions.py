@@ -8,6 +8,11 @@ from .constants import WinEvent, ObjectID
 from .tracker import Subfilter, WinEventTracker
 
 _mod = Module()
+
+_mod.tag(
+    "si_tracking__active",
+    desc="Activates Smart Input's win event tracking for a better alternative to fixed waiting durations in the `user.wait_for_…()` actions.",
+)
 _mod.setting(
     "si_tracking__window_activation_timeout",
     type=float,
@@ -24,6 +29,7 @@ _mod.setting(
 _ctx = Context()
 _ctx.matches = """
 os: windows
+tag: user.si_tracking__active
 """
 
 _lock = Lock()
