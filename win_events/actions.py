@@ -16,13 +16,13 @@ _mod.tag(
 _mod.setting(
     "si_tracking__window_activation_timeout",
     type=float,
-    default=2.0,
+    default=2.5,
     desc="Seconds after which the `user.wait_for_window_activation()` actions raise a `TimeoutError`. Note that there's an additional non-configurable few-second timeout after which tracking is automatically aborted if a call to `user.track_window_activation()` isn't matched by a call to `user.wait_for_window_activation()`.",
 )
 _mod.setting(
     "si_tracking__focus_timeout",
     type=float,
-    default=1.0,
+    default=0.9,
     desc="Same as `user.si_tracking__window_activation_timeout`, but for `user.…_focus()`.",
 )
 

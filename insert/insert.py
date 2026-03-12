@@ -35,7 +35,7 @@ _mod.setting(
 _mod.setting(
     "si_insert__caret_still_ms",
     type=float,
-    default=55,
+    default=40,
     desc="After sending the events for a chunk of text, incl. the last, these are the number of milliseconds the caret (text input cursor) position must not change until the target window is regarded as ready to receive further input. Note that, because of visual lag, the standstill may appear to be much shorter than it actually is eventwise; the criterion for determination of the value's magnitude is correct input. There could be some apps that don't report their carets in a manner currently recognizable by Smart Input. A value of 0 turns off all waiting for caret standstill. The concrete situations of waiting are controlled by some of the boolean settings.",
 )
 _mod.setting(
@@ -43,7 +43,6 @@ _mod.setting(
     type=bool,
     default=False,
     desc="Whether the setting `user.si_insert__caret_still_ms` applies when transitioning from a Unicode BMP character to a supplementary character. This can be necessary to prevent the characters from being mixed up.",
-    #i In Qt apps, sending Unicode supplementary characters (those consisting of two surrogates in UTF-16) *after* BMP characters without waiting for caret standstill (e.g., by using a single `SendInput()` call) most often leads to the supplementary characters being placed *before* all or some of the BMP characters. This makes it necessary to start a new batch of events at every transition from BMP to supplementary characters and wait for caret standstill before continuing. (The other transition is unproblematic.) This technique alone prevents mixed up characters in many cases. Together with yielding, the problem disappears.
 )
 _mod.setting(
     "si_insert__caret_still_before_tab",
