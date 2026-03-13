@@ -36,7 +36,7 @@ _mod.setting(
     "wtk_insert__caret_still_ms",
     type=float,
     default=40,
-    desc="After sending the events for a chunk of text, incl. the last, these are the number of milliseconds the caret (text input cursor) position must not change until the target window is regarded as ready to receive further input. Note that, because of visual lag, the standstill may appear to be much shorter than it actually is eventwise; the criterion for determination of the value's magnitude is correct input. There could be some apps that don't report their carets in a manner currently recognizable by Windows Toolkit. A value of 0 turns off all waiting for caret standstill. The concrete situations of waiting are controlled by some of the boolean settings.",
+    desc="After sending the events for a chunk of text, incl. the last, these are the number of milliseconds the caret (text input cursor) position must not change until the target window is regarded as ready to receive further input. Note that, because of visual lag, the standstill may appear to be much shorter than it actually is eventwise; the criterion for determination of the value's magnitude is correct input. There are UI frameworks that don't report carets in a manner recognizable by Windows Toolkit, in which case the waiting duration remains fixed and won't be extended. A value of 0 turns off all waiting for caret standstill. The concrete situations of waiting are controlled by some of the boolean settings.",
 )
 _mod.setting(
     "wtk_insert__caret_still_before_supp_char",
@@ -97,7 +97,7 @@ class _MainActions:
         Real key events are only simulated for the following keys:
 
         - Tab (`\t`) - As with Talon's `insert()`, you must be careful not to accidentally accept editor suggestions. For most code use cases, only ever inserting `\t` at the start of a line or after other whitespace should suffice. If you work with TSV (tab-separated values) or something like that, you may need to turn off automatically appearing suggestion overlays completely.
-        - Enter (`\n`) - As for Talon's `insert()`, you should turn off accepting suggestions with Enter altogether in every app, because characters triggering these overlays at the end of lines are basically unavoidable. See also Windows Toolkit repository's readme.
+        - Enter (`\n`) - As for Talon's `insert()`, you should turn off accepting suggestions with Enter altogether in every app, because characters triggering these overlays at the end of lines are basically unavoidable. See also Windows Toolkit's readme.
         - Backspace (`\b`) - Finalizing the current word with, e.g., a space character and deleting it again can dismiss a suggestion overlay, but race conditions may cause problems in certain apps. The setting `user.wtk_insert__caret_still_before_backspace` may help.
         - Esc (`\N{ESC}`, `\x1b`) - Can dismiss a suggestion overlay to prevent confirming it, but race conditions may cause problems in certain apps. The setting `user.wtk_insert__caret_still_before_esc` may help. In general, success depends too much on app settings and IDE state (find box incl. its highlights, etc.).
 
