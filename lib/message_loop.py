@@ -77,7 +77,7 @@ class MessageLoop:
 
         self.__lock = Lock()
 
-        self.__unique_message_id = user32.RegisterWindowMessageW("Talon.SmartInput.MessageLoop.{4dbac389-d878-44b1-b358-17fa6cc04375}")
+        self.__unique_message_id = user32.RegisterWindowMessageW("Talon.WindowsToolkit.MessageLoop.{4dbac389-d878-44b1-b358-17fa6cc04375}")
         if not self.__unique_message_id:
             raise ctypes.WinError(kernel32.GetLastError())
         #i Combined with thread ID. Not `WM_USER+x`/`WM_APP+x`, because we don't know what Talon or user code might post to threads.

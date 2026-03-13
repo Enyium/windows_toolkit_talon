@@ -23,61 +23,61 @@ else:
 _mod = Module()
 
 _mod.tag(
-    "si_insert__active",
-    desc="Activates Smart Input's `insert()` override.",
+    "wtk_insert__active",
+    desc="Activates Windows Toolkit's `insert()` override.",
 )
 _mod.setting(
-    "si_insert__yield_time",
+    "wtk_insert__yield_time",
     type=bool,
     default=False,
     desc="Whether `insert()` waits before every character until the target window's message pump continues. This can be necessary to prevent the target window from mixing up characters, especially if significant work like spell checking is done after every new character.",
 )
 _mod.setting(
-    "si_insert__caret_still_ms",
+    "wtk_insert__caret_still_ms",
     type=float,
     default=40,
-    desc="After sending the events for a chunk of text, incl. the last, these are the number of milliseconds the caret (text input cursor) position must not change until the target window is regarded as ready to receive further input. Note that, because of visual lag, the standstill may appear to be much shorter than it actually is eventwise; the criterion for determination of the value's magnitude is correct input. There could be some apps that don't report their carets in a manner currently recognizable by Smart Input. A value of 0 turns off all waiting for caret standstill. The concrete situations of waiting are controlled by some of the boolean settings.",
+    desc="After sending the events for a chunk of text, incl. the last, these are the number of milliseconds the caret (text input cursor) position must not change until the target window is regarded as ready to receive further input. Note that, because of visual lag, the standstill may appear to be much shorter than it actually is eventwise; the criterion for determination of the value's magnitude is correct input. There could be some apps that don't report their carets in a manner currently recognizable by Windows Toolkit. A value of 0 turns off all waiting for caret standstill. The concrete situations of waiting are controlled by some of the boolean settings.",
 )
 _mod.setting(
-    "si_insert__caret_still_before_supp_char",
+    "wtk_insert__caret_still_before_supp_char",
     type=bool,
     default=False,
-    desc="Whether the setting `user.si_insert__caret_still_ms` applies when transitioning from a Unicode BMP character to a supplementary character. This can be necessary to prevent the characters from being mixed up.",
+    desc="Whether the setting `user.wtk_insert__caret_still_ms` applies when transitioning from a Unicode BMP character to a supplementary character. This can be necessary to prevent the characters from being mixed up.",
 )
 _mod.setting(
-    "si_insert__caret_still_before_tab",
+    "wtk_insert__caret_still_before_tab",
     type=bool,
     default=False,
-    desc=r"""Whether the setting `user.si_insert__caret_still_ms` applies before `"\t"`.""",
+    desc=r"""Whether the setting `user.wtk_insert__caret_still_ms` applies before `"\t"`.""",
 )
 _mod.setting(
-    "si_insert__caret_still_before_enter",
+    "wtk_insert__caret_still_before_enter",
     type=bool,
     default=False,
-    desc=r"""Whether the setting `user.si_insert__caret_still_ms` applies before `"\n"`.""",
+    desc=r"""Whether the setting `user.wtk_insert__caret_still_ms` applies before `"\n"`.""",
 )
 _mod.setting(
-    "si_insert__caret_still_before_backspace",
+    "wtk_insert__caret_still_before_backspace",
     type=bool,
     default=True,
-    desc=r"""Whether the setting `user.si_insert__caret_still_ms` applies before `"\b"`. This may make a preceding character like space reliable in dismissing suggestion overlays.""",
+    desc=r"""Whether the setting `user.wtk_insert__caret_still_ms` applies before `"\b"`. This may make a preceding character like space reliable in dismissing suggestion overlays.""",
 )
 _mod.setting(
-    "si_insert__caret_still_before_esc",
+    "wtk_insert__caret_still_before_esc",
     type=bool,
     default=True,
-    desc=r"""Whether the setting `user.si_insert__caret_still_ms` applies before `"\N{ESC}"`. This may make Esc reliable in dismissing suggestion overlays.""",
+    desc=r"""Whether the setting `user.wtk_insert__caret_still_ms` applies before `"\N{ESC}"`. This may make Esc reliable in dismissing suggestion overlays.""",
 )
 _mod.setting(
-    "si_insert__caret_still_at_end",
+    "wtk_insert__caret_still_at_end",
     type=bool,
     default=True,
-    desc="Whether the setting `user.si_insert__caret_still_ms` applies at the end of the text insertion. This is useful to ensure a settled state for follow-up voice commands.",
+    desc="Whether the setting `user.wtk_insert__caret_still_ms` applies at the end of the text insertion. This is useful to ensure a settled state for follow-up voice commands.",
 )
 
 _ctx = Context()
 _ctx.matches = r"""
-tag: user.si_insert__active
+tag: user.wtk_insert__active
 """
 
 _INSERTION_TIMEOUT = 30
@@ -97,21 +97,21 @@ class _MainActions:
         Real key events are only simulated for the following keys:
 
         - Tab (`\t`) - As with Talon's `insert()`, you must be careful not to accidentally accept editor suggestions. For most code use cases, only ever inserting `\t` at the start of a line or after other whitespace should suffice. If you work with TSV (tab-separated values) or something like that, you may need to turn off automatically appearing suggestion overlays completely.
-        - Enter (`\n`) - As for Talon's `insert()`, you should turn off accepting suggestions with Enter altogether in every app, because characters triggering these overlays at the end of lines are basically unavoidable. See also Smart Input repository's readme.
-        - Backspace (`\b`) - Finalizing the current word with, e.g., a space character and deleting it again can dismiss a suggestion overlay, but race conditions may cause problems in certain apps. The setting `user.si_insert__caret_still_before_backspace` may help.
-        - Esc (`\N{ESC}`, `\x1b`) - Can dismiss a suggestion overlay to prevent confirming it, but race conditions may cause problems in certain apps. The setting `user.si_insert__caret_still_before_esc` may help. In general, success depends too much on app settings and IDE state (find box incl. its highlights, etc.).
+        - Enter (`\n`) - As for Talon's `insert()`, you should turn off accepting suggestions with Enter altogether in every app, because characters triggering these overlays at the end of lines are basically unavoidable. See also Windows Toolkit repository's readme.
+        - Backspace (`\b`) - Finalizing the current word with, e.g., a space character and deleting it again can dismiss a suggestion overlay, but race conditions may cause problems in certain apps. The setting `user.wtk_insert__caret_still_before_backspace` may help.
+        - Esc (`\N{ESC}`, `\x1b`) - Can dismiss a suggestion overlay to prevent confirming it, but race conditions may cause problems in certain apps. The setting `user.wtk_insert__caret_still_before_esc` may help. In general, success depends too much on app settings and IDE state (find box incl. its highlights, etc.).
 
         You can use the following tags and settings to configure the behavior of the action:
 
-        - `user.si_insert__active`
-        - `user.si_insert__yield_time`
-        - `user.si_insert__caret_still_ms`
-        - `user.si_insert__caret_still_before_supp_char`
-        - `user.si_insert__caret_still_before_tab`
-        - `user.si_insert__caret_still_before_enter`
-        - `user.si_insert__caret_still_before_backspace`
-        - `user.si_insert__caret_still_before_esc`
-        - `user.si_insert__caret_still_at_end`
+        - `user.wtk_insert__active`
+        - `user.wtk_insert__yield_time`
+        - `user.wtk_insert__caret_still_ms`
+        - `user.wtk_insert__caret_still_before_supp_char`
+        - `user.wtk_insert__caret_still_before_tab`
+        - `user.wtk_insert__caret_still_before_enter`
+        - `user.wtk_insert__caret_still_before_backspace`
+        - `user.wtk_insert__caret_still_before_esc`
+        - `user.wtk_insert__caret_still_at_end`
         """
 
         _InsertSession()(text)
@@ -129,14 +129,14 @@ class _InsertSession:
     def __init__(self):
         self.__deadline = None
 
-        self.__must_yield_time = settings.get("user.si_insert__yield_time")
-        self.__caret_still_duration = max(0, settings.get("user.si_insert__caret_still_ms") / 1000)
-        self.__must_wait_before_supp_char = settings.get("user.si_insert__caret_still_before_supp_char")
-        self.__must_wait_before_tab = settings.get("user.si_insert__caret_still_before_tab")
-        self.__must_wait_before_enter = settings.get("user.si_insert__caret_still_before_enter")
-        self.__must_wait_before_backspace = settings.get("user.si_insert__caret_still_before_backspace")
-        self.__must_wait_before_esc = settings.get("user.si_insert__caret_still_before_esc")
-        self.__must_wait_at_end = settings.get("user.si_insert__caret_still_at_end")
+        self.__must_yield_time = settings.get("user.wtk_insert__yield_time")
+        self.__caret_still_duration = max(0, settings.get("user.wtk_insert__caret_still_ms") / 1000)
+        self.__must_wait_before_supp_char = settings.get("user.wtk_insert__caret_still_before_supp_char")
+        self.__must_wait_before_tab = settings.get("user.wtk_insert__caret_still_before_tab")
+        self.__must_wait_before_enter = settings.get("user.wtk_insert__caret_still_before_enter")
+        self.__must_wait_before_backspace = settings.get("user.wtk_insert__caret_still_before_backspace")
+        self.__must_wait_before_esc = settings.get("user.wtk_insert__caret_still_before_esc")
+        self.__must_wait_at_end = settings.get("user.wtk_insert__caret_still_at_end")
 
         self.__events = None
         self.__num_events = 0

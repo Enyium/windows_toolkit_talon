@@ -29,7 +29,7 @@ def _script_main():
 
             @mod.action_class
             class Actions:
-                def si_show_std_dialogs():
+                def wtk_show_std_dialogs():
                     """Shows the standard dialogs that the code currently defines to show, so you can investigate them with spy tools or test the code that is meant to recognize them."""
                     _show_dialogs()
 

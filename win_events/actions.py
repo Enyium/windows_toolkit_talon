@@ -10,26 +10,26 @@ from .tracker import Subfilter, WinEventTracker
 _mod = Module()
 
 _mod.tag(
-    "si_tracking__active",
-    desc="Activates Smart Input's win event tracking for a better alternative to fixed waiting durations in the `user.wait_for_…()` actions.",
+    "wtk_tracking__active",
+    desc="Activates Windows Toolkit's win event tracking for a better alternative to fixed waiting durations in the `user.wait_for_…()` actions.",
 )
 _mod.setting(
-    "si_tracking__window_activation_timeout",
+    "wtk_tracking__window_activation_timeout",
     type=float,
     default=2.5,
     desc="Seconds after which the `user.wait_for_window_activation()` actions raise a `TimeoutError`. Note that there's an additional non-configurable few-second timeout after which tracking is automatically aborted if a call to `user.track_window_activation()` isn't matched by a call to `user.wait_for_window_activation()`.",
 )
 _mod.setting(
-    "si_tracking__focus_timeout",
+    "wtk_tracking__focus_timeout",
     type=float,
     default=0.9,
-    desc="Same as `user.si_tracking__window_activation_timeout`, but for `user.…_focus()`.",
+    desc="Same as `user.wtk_tracking__window_activation_timeout`, but for `user.…_focus()`.",
 )
 
 _ctx = Context()
 _ctx.matches = """
 os: windows
-tag: user.si_tracking__active
+tag: user.wtk_tracking__active
 """
 
 _lock = Lock()
@@ -91,7 +91,7 @@ class _UserActions:
     def wait_for_window_activation(fixed_fallback_duration: Union[float, str]) -> None:
         _wait_for_winevents(
             WinEvent.SYSTEM_FOREGROUND,
-            timeout=settings.get("user.si_tracking__window_activation_timeout"),
+            timeout=settings.get("user.wtk_tracking__window_activation_timeout"),
         )
 
     def track_focus() -> None:
@@ -129,13 +129,13 @@ class _UserActions:
     def wait_for_focus(fixed_fallback_duration: Union[float, str]) -> None:
         _wait_for_winevents(
             (WinEvent.OBJECT_FOCUS, WinEvent.OBJECT_LOCATIONCHANGE),
-            timeout=settings.get("user.si_tracking__focus_timeout"),
+            timeout=settings.get("user.wtk_tracking__focus_timeout"),
         )
 
 
 @_mod.action_class
 class _TestActions:
-    def private_si_test_win_event_tracker() -> None:
+    def private_wtk_test_win_event_tracker() -> None:
         """Simple test for the `WinEventTracker` class."""
 
         caret_tracker = WinEventTracker(
@@ -164,7 +164,7 @@ class _TestActions:
 
             print("Done waiting.")
 
-    def private_si_test_wait_for_focus() -> None:
+    def private_wtk_test_wait_for_focus() -> None:
         """Test for the `user.wait_for_focus()` action."""
 
         import time

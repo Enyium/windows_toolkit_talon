@@ -76,8 +76,8 @@ _retry_window = None
 
 # Caching.
 _script_load_time_ns = time.perf_counter_ns()
-_FRAMEWORK_INT_PROP_NAME = w("Talon.SmartInput.UIFramework")
-_ASSESSMENT_TIME_NS_PROP_NAME = w("Talon.SmartInput.UIFramework.AssessmentTimeNS")
+_FRAMEWORK_INT_PROP_NAME = w("Talon.WindowsToolkit.UIFramework")
+_ASSESSMENT_TIME_NS_PROP_NAME = w("Talon.WindowsToolkit.UIFramework.AssessmentTimeNS")
 
 # Talon bridge.
 _mod = Module()

@@ -1,10 +1,12 @@
-# Smart Input
+# Windows Toolkit
+
+(Not affiliated with Microsoft)
 
 [TODO]
 
 # Setup
 
-Interacting with suggestion overlays (or respective ghost text) can be subject to race conditions. For both Talon's default `insert()` and Smart Input's replacement, in every app that supports suggestions, it's advisable to turn off accepting suggestions with Enter, so that insertions like `"return\n"` never do something unintended:
+Interacting with suggestion overlays (or respective ghost text) can be subject to race conditions. For both Talon's default `insert()` and Windows Toolkit's replacement, in every app that supports suggestions, it's advisable to turn off accepting suggestions with Enter, so that insertions like `"return\n"` never do something unintended:
 
 - VS Code: Settings (Ctrl+,) > search for setting
   - [`editor.acceptSuggestionOnEnter`](https://enyium.github.io/uri-tools/v1/load.html?uri=vscode%3A%2F%2Fsettings%2Feditor.acceptSuggestionOnEnter) > value "off"
