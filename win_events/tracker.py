@@ -12,7 +12,7 @@ from uuid import UUID
 
 from talon import app
 
-from .. import reload_resilience
+from ..lib import reload_resilience
 
 if app.platform == "windows" or TYPE_CHECKING:
     import pythoncom
