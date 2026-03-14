@@ -25,13 +25,10 @@ def _script_main() -> None:
         case "talon.exe":
             from talon import Module
 
-            mod = Module()
-
-            @mod.action_class
-            class Actions:
-                def wtk_show_std_dialogs() -> None:
-                    """Shows the standard dialogs that the code currently defines to show, so you can investigate them with spy tools or test the code that is meant to recognize them."""
-                    _show_dialogs()
+            @Module().action
+            def wtk_show_std_dialogs() -> None:
+                """Shows the standard dialogs that the code currently defines to show, so you can investigate them with spy tools or test the code that is meant to recognize them."""
+                _show_dialogs()
 
         case "pythonw.exe" | "python.exe":
             success = user32.SetProcessDpiAwarenessContext(wapi.cast("DPI_AWARENESS_CONTEXT", user32.DPI_AWARENESS_CONTEXT_PER_MONITOR_AWARE_V2))

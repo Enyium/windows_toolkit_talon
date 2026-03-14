@@ -40,6 +40,7 @@ _tracker_cleanup_job: Optional[Job] = None
 #TODO: WITH COMMUNITY PEOPLE: Have default actions in `community`, allowing users to install their tracker of choice that works for their OS? This would be similar to the default support of VS Code plus better support when installing the briding VS Code extension.
 @_mod.action_class
 class _Actions:
+    @staticmethod
     def track_window_activation() -> None:
         """Starts to track events about window activation.
 
@@ -53,11 +54,13 @@ class _Actions:
         if True:
             pass
 
+    @staticmethod
     def wait_for_window_activation(fixed_fallback_duration: Union[float, str]) -> None:
         """Waits until a window seems to have been activated. You must have called `user.track_window_activation()` first."""
 
         actions.sleep(fixed_fallback_duration)
 
+    @staticmethod
     def track_focus() -> None:
         """Starts to track events from the active window that typically occur after a UI element focus change in most apps. Because this includes caret location change events, the caret must not still be moving from the previous action.
 
@@ -71,6 +74,7 @@ class _Actions:
         if True:
             pass
 
+    @staticmethod
     def wait_for_focus(fixed_fallback_duration: Union[float, str]) -> None:
         """Waits until a UI element seems to have acquired focus. You must have called `user.track_focus()` first."""
 
@@ -79,6 +83,7 @@ class _Actions:
 
 @_ctx.action_class("user")
 class _UserActions:
+    @staticmethod
     def track_window_activation() -> None:
         global _tracker
 
@@ -88,12 +93,14 @@ class _UserActions:
             _tracker = WinEventTracker(Subfilter(WinEvent.SYSTEM_FOREGROUND))
             _start_tracker()
 
+    @staticmethod
     def wait_for_window_activation(fixed_fallback_duration: Union[float, str]) -> None:
         _wait_for_winevents(
             WinEvent.SYSTEM_FOREGROUND,
             timeout=settings.get("user.wtk_tracking__window_activation_timeout"),
         )
 
+    @staticmethod
     def track_focus() -> None:
         global _tracker
 
@@ -126,6 +133,7 @@ class _UserActions:
             )
             _start_tracker()
 
+    @staticmethod
     def wait_for_focus(fixed_fallback_duration: Union[float, str]) -> None:
         _wait_for_winevents(
             (WinEvent.OBJECT_FOCUS, WinEvent.OBJECT_LOCATIONCHANGE),
@@ -135,6 +143,7 @@ class _UserActions:
 
 @_mod.action_class
 class _TestActions:
+    @staticmethod
     def private_wtk_test_win_event_tracker() -> None:
         """Simple test for the `WinEventTracker` class."""
 
@@ -164,6 +173,7 @@ class _TestActions:
 
             print("Done waiting.")
 
+    @staticmethod
     def private_wtk_test_wait_for_focus() -> None:
         """Test for the `user.wait_for_focus()` action."""
 

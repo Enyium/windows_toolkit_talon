@@ -119,6 +119,7 @@ class WinEventListener:
             self.__weak_callbacks_by_hook_handles[hook_handle] = to_weak_callback(on_winevent)
             return hook_handle
 
+    @staticmethod
     def _verify_event_slice(event_range: slice) -> None:
         if not (
             isinstance(event_range.start, WinEvent)

@@ -89,6 +89,7 @@ _MOUSE_KEYS = (win32con.VK_LBUTTON, win32con.VK_RBUTTON, win32con.VK_MBUTTON, wi
 
 @_ctx.action_class("main")
 class _MainActions:
+    @staticmethod
     def insert(text: str):
         """A reimplementation and replacement of Talon's original action that is much faster, doesn't have issues with dead keys, and is more resilient against interference.
 
