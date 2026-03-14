@@ -1,12 +1,9 @@
 {
     "editor.wordWrap": "on",
-
-    "python.defaultInterpreterPath": "${env:APPDATA}\\talon\\venv\\3.11\\Scripts\\python.exe",
-    "python.analysis.diagnosticSeverityOverrides": {
-        "reportMissingModuleSource": "none",
-    },
     "[python]": {
         "editor.defaultFormatter": "charliermarsh.ruff",
         "editor.formatOnSave": false,
     },
+    "python.defaultInterpreterPath": "${env:APPDATA}\\talon\\venv\\3.11\\Scripts\\python.exe",
+    "python.analysis.diagnosticMode": "workspace",
 }
