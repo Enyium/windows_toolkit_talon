@@ -1,7 +1,7 @@
 import functools
 import textwrap
 import threading
-from threading import Event, Lock, RLock
+from threading import Event, RLock
 import traceback
 from typing import Optional, Protocol, TYPE_CHECKING, Union
 from uuid import UUID
@@ -219,7 +219,7 @@ class WinEventListener:
 
     @staticmethod
     def __on_thread_exit(
-        lock: Lock,
+        lock: RLock,
         is_shut_down_event: Event,
         weak_callbacks_by_hook_handles: dict[CData, WeakCallback[OnWinEventCallback]],
     ) -> None:
