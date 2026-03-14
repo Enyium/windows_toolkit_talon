@@ -153,7 +153,8 @@ class TerminationHook:
                     weak_callbacks[write_index] = weak_callback
                     write_index += 1
 
-            del weak_callbacks[write_index:]
+            while len(weak_callbacks) > write_index:
+                weak_callbacks.pop()
 
         weak_callbacks.append(to_weak_callback(callback))
 
