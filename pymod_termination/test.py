@@ -16,15 +16,15 @@
 # 
 # 
 # class Foo:
-#     def __init__(self):
+#     def __init__(self) -> None:
 #         _pymod_termination_hook.on_module_finalize(self.on_pymod_finalize)
 #         _pymod_termination_hook.on_globals_teardown(self.on_globals_teardown)
 # 
-#     def on_pymod_finalize(self):
+#     def on_pymod_finalize(self) -> None:
 #         print(f"In callback: Finalizing module object with `__dict__` at 0x{_module_dict_id:X}.")
 #         _must_exit_thread.set()
 # 
-#     def on_globals_teardown(self):
+#     def on_globals_teardown(self) -> None:
 #         print(f"In callback: Tearing down module with `__dict__` at 0x{_module_dict_id:X}.")
 # 
 # 
@@ -34,7 +34,7 @@
 # 
 # _foo = Foo()
 # 
-# def _run_thread():
+# def _run_thread() -> None:
 #     print(f"Start of thread in module with `__dict__` at 0x{_module_dict_id:X}.")
 #     with _pymod_termination_hook.globals_teardown_deferrer:
 #         while True:

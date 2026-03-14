@@ -142,7 +142,7 @@ class TerminationHook:
         return callback
 
     @staticmethod
-    def __add_callback(weak_callbacks: __WeakCallbackQueue, callback: Callable[[], None]):
+    def __add_callback(weak_callbacks: __WeakCallbackQueue, callback: Callable[[], None]) -> None:
         """You must lock the queue."""
 
         if len(weak_callbacks) > 100:
@@ -168,7 +168,7 @@ class TerminationHook:
 
         return TeardownDeferrer(self)
 
-    def _do(self, command: _Command):
+    def _do(self, command: _Command) -> None:
         is_finalizing = False
         must_tear_down = False
 

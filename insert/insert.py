@@ -126,7 +126,7 @@ class _InsertSession:
         0x1B: win32con.VK_ESCAPE,
     }
 
-    def __init__(self):
+    def __init__(self) -> None:
         self.__deadline = None
 
         self.__must_yield_time = settings.get("user.wtk_insert__yield_time")
@@ -146,7 +146,7 @@ class _InsertSession:
         self.__insertion_hwnd = None
         self.__interference_tracker = None
 
-    def __call__(self, text: str):
+    def __call__(self, text: str) -> None:
         if not text:
             return
         #i TalonScript code sometimes contains `insert(capture or "")`.
@@ -322,7 +322,7 @@ class _InsertSession:
 
             #i If unbalanced down-events were possible after flushing, an emergency key-up would be needed in an `except` block after a large `try` block.
 
-    def __yield_to_target(self, insertion_hwnd: CData):
+    def __yield_to_target(self, insertion_hwnd: CData) -> None:
         """Yields time to the target thread of the insertion.
 
         Blocks until the target thread is in its Win32 message loop again to give it time to process previous events, which may have been transferred to a UI-framework-specific message loop. This is relevant in Qt apps that tend to insert Unicode supplementary characters from later in the event stream before earlier BMP characters. It's *especially* relevant in the output pane of Qt-based gImageReader v3.4.3 where each new character initiates a text check; it's worse with longer text box contents. In Qt apps, without yielding, there can also be problems with the very first insertion of text containing supplementary characters after app start.
@@ -348,7 +348,7 @@ class _InsertSession:
             else:
                 raise ctypes.WinError(last_error)
 
-    def __enqueue_vk_event(self, vk: int, up: bool):
+    def __enqueue_vk_event(self, vk: int, up: bool) -> None:
         scancode = win32api.MapVirtualKey(vk, user32.MAPVK_VK_TO_VSC_EX)
         has_e0_extended_scan_code = (scancode & 0xFF00) == 0xE000
         #i - AI GPT-5.2 thinks `wScan` must not contain the extended-prefix. But the docs for `KEYEVENTF_EXTENDEDKEY` seem to say otherwise.
@@ -372,7 +372,7 @@ class _InsertSession:
 
         self.__num_events += 1
 
-    def __enqueue_utf16_code_unit_event(self, code_unit: int, up: bool):
+    def __enqueue_utf16_code_unit_event(self, code_unit: int, up: bool) -> None:
         event = self.__events[self.__num_events]
 
         event.type = win32con.INPUT_KEYBOARD
@@ -389,7 +389,7 @@ class _InsertSession:
 
         self.__num_events += 1
 
-    def __flush_queue(self):
+    def __flush_queue(self) -> None:
         """Checks on a best-effort basis whether the insertion target changed or there's an interfering state like pressed modifier keys, and then sends the queued events via `SendInput()`."""
 
         if self.__num_events <= 0:
@@ -446,7 +446,7 @@ class _InsertSession:
         # Reset event queue with regard to next flush.
         self.__num_events = 0
 
-    def __fill_gui_thread_info(self, may_retry: bool = False):
+    def __fill_gui_thread_info(self, may_retry: bool = False) -> None:
         """Fetches the `GUITHREADINFO` for the current foreground thread and saves it in the instance. Optionally retries repeatedly until a brief timeout elapsed to compensate for window activation in progress (observed null window handle when closing Notepad)."""
 
         deadline = time.perf_counter() + 0.050 if may_retry else None

@@ -29,7 +29,7 @@ else:
 
 _script_main_callbacks = deque()
 
-def _script_main():
+def _script_main() -> None:
     while _script_main_callbacks:
         _script_main_callbacks.popleft()()
 
@@ -42,7 +42,7 @@ class WinEventTracker:
     """
 
     @classmethod
-    def _main(cls):
+    def _main(cls) -> None:
         listener_uuid4 = UUID("8b5e0d5c-629c-4f1b-9d29-a225b47a5529")
         try:
             old_listener = reload_resilience.pop_value(listener_uuid4)
@@ -253,7 +253,7 @@ class WinEventTracker:
             self.__num_events_by_events[event] = num_events
             self.__condition.notify_all()
 
-    def reset_wait_start(self):
+    def reset_wait_start(self) -> None:
         """Sets the start time for the next `wait()` call to now."""
 
         self.__waiting_start_time = time.perf_counter()
@@ -456,7 +456,7 @@ class Subfilter:
     role: Optional[Role] = None
     """Is ignored for the events `OBJECT_CREATE` and `OBJECT_DESTROY`."""
 
-    def __post_init__(self):
+    def __post_init__(self) -> None:
         if isinstance(self.events, (WinEvent, slice)):
             self.normalized_events = (self.events,)
         else:

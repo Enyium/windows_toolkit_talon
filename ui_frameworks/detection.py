@@ -83,23 +83,23 @@ _ASSESSMENT_TIME_NS_PROP_NAME = w("Talon.WindowsToolkit.UIFramework.AssessmentTi
 _mod = Module()
 
 #
-def _script_main():
+def _script_main() -> None:
     _ui_framework_scope.update()
     app.register("ready", _on_ready)
     ui.register("win_focus", _on_win_focus)
 
-def _on_ready():
+def _on_ready() -> None:
     with _lock:
         toplevel_window = ui.active_window()
         if toplevel_window.id != -1:  # Guard against Talon launch.
             _update_scope(toplevel_window)
 
-def _on_win_focus(toplevel_window: Window):
+def _on_win_focus(toplevel_window: Window) -> None:
     with _lock:
         _abort_retry()
         _update_scope(toplevel_window)
 
-def _schedule_retry(toplevel_window: Window):
+def _schedule_retry(toplevel_window: Window) -> None:
     """Schedules a retry of assessing the UI framework after a short duration. Raises an exception if a timeout was reached.
 
     This function changes global state.
@@ -121,17 +121,17 @@ def _schedule_retry(toplevel_window: Window):
     _retry_window = toplevel_window
     _retry_job = cron.after("100ms", _on_retry_job)
 
-def _abort_retry():
+def _abort_retry() -> None:
     global _retry_job, _retry_window
     cron.cancel(_retry_job)
     _retry_job = None
     _retry_window = None
 
-def _on_retry_job():
+def _on_retry_job() -> None:
     with _lock:
         _update_scope(_retry_window)
 
-def _update_scope(toplevel_window: Window):
+def _update_scope(toplevel_window: Window) -> None:
     global _framework
 
     _framework = _Detector()(toplevel_window)

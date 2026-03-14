@@ -19,7 +19,7 @@ from .winapi import appwiz, comctl32, kernel32, mpr, user32, wapi
 _running_exe_path = Path(win32api.GetModuleFileNameW(None))
 
 
-def _script_main():
+def _script_main() -> None:
     running_exe_name = _running_exe_path.name.lower()
     match running_exe_name:
         case "talon.exe":
@@ -29,7 +29,7 @@ def _script_main():
 
             @mod.action_class
             class Actions:
-                def wtk_show_std_dialogs():
+                def wtk_show_std_dialogs() -> None:
                     """Shows the standard dialogs that the code currently defines to show, so you can investigate them with spy tools or test the code that is meant to recognize them."""
                     _show_dialogs()
 
@@ -44,7 +44,7 @@ def _script_main():
             raise RuntimeError(f'Unexpected executable name "{running_exe_name}".')
 
 
-def _show_dialogs():
+def _show_dialogs() -> None:
     """In this function, you can specify which dialogs should be shown when the Talon action runs. Comment in and out accordingly."""
 
     #i The `GWLP_HINSTANCE` filenames of the dialog top-level windows are relevant for the function checking loaded modules during UI framework detection.
@@ -60,7 +60,7 @@ def _show_dialogs():
     # _spawn_dialog_subprocess(_AppWizardCPLDialogs.new_link_here)
 
 
-def _spawn_dialog_subprocess(static_method):
+def _spawn_dialog_subprocess(static_method) -> None:
     """Spawns a child Python process running this script file and tells it to show the specified dialog, so the dialog can't block Talon and spy tools don't have problems spying on the window as some do, perhaps because of Talon's UIAccess privileges."""
 
     env = os.environ.copy()
@@ -100,7 +100,7 @@ def _spawn_dialog_subprocess(static_method):
     if process.stdout is None:
         raise RuntimeError("Stdout pipe didn't work.")
 
-    def transfer_lines(source_stream, target_stream, line_prefix: str):
+    def transfer_lines(source_stream, target_stream, line_prefix: str) -> None:
         for line in iter(source_stream.readline, ""):
             target_stream.write(line_prefix + line)
             #i Line already ends with newline character.
@@ -114,7 +114,7 @@ def _spawn_dialog_subprocess(static_method):
     ).start()
 
 
-def _show_dialog_by_args():
+def _show_dialog_by_args() -> None:
     try:
         double_dash_index = sys.argv.index("--")
         method_path = sys.argv[double_dash_index + 1]
@@ -141,7 +141,7 @@ class _WinuserDialogs:
     """Source listing: <https://learn.microsoft.com/en-us/windows/win32/api/winuser/>."""
 
     @staticmethod
-    def message_box_min():
+    def message_box_min() -> None:
         button = user32.MessageBoxW(
             wapi.NULL,
             wapi.NULL,
@@ -153,7 +153,7 @@ class _WinuserDialogs:
         #i Similar: `MessageBoxExW()`, `MessageBoxIndirectW()`.
 
     @staticmethod
-    def message_box_max():
+    def message_box_max() -> None:
         """Try changing the button set inside."""
 
         button_set = (
@@ -180,7 +180,7 @@ class _ControlLibraryDialogs:
     """Source listing: <https://learn.microsoft.com/en-us/windows/win32/controls/individual-control-info>."""
 
     @staticmethod
-    def task_dialog_min():
+    def task_dialog_min() -> None:
         config = wapi.new("TASKDIALOGCONFIG *")
         config.cbSize = wapi.sizeof("TASKDIALOGCONFIG")
 
@@ -195,7 +195,7 @@ class _ControlLibraryDialogs:
         #i Similar: `TaskDialog()`.
 
     @staticmethod
-    def task_dialog_max():
+    def task_dialog_max() -> None:
         """Try commenting in some code inside."""
 
         config = wapi.new("TASKDIALOGCONFIG *")
@@ -285,7 +285,7 @@ class _ControlLibraryDialogs:
             raise ctypes.WinError(hresult)
 
     @staticmethod
-    def task_dialog_like_message_box():
+    def task_dialog_like_message_box() -> None:
         """The `MessageBoxW()` dialog doesn't contain DirectUI elements. However, the message box shown when Windows' open- or save-dialog complains about an invalid filename does. They are very similar to each other. The message box this method shows has an identical child window tree to the latter, but additionally shows an icon in the title bar. So, it also shouldn't be what the open- or save-dialog uses. However, both are created by `comctl32.dll`. So, maybe, there's something we're overlooking."""
 
         config = wapi.new("TASKDIALOGCONFIG *")
@@ -412,13 +412,13 @@ class _WNetDialogs:
     """Source listing: <https://learn.microsoft.com/en-us/windows/win32/wnet/wnet-functions>."""
 
     @staticmethod
-    def wnet_connection_dialog():
+    def wnet_connection_dialog() -> None:
         result = mpr.WNetConnectionDialog(wapi.NULL, mpr.RESOURCETYPE_DISK)
         if result != mpr.NO_ERROR and result != -1 & 0xFFFF_FFFF:
             raise RuntimeError("`WNetConnectionDialog()` failed.")
 
     @staticmethod
-    def wnet_disconnect_dialog():
+    def wnet_disconnect_dialog() -> None:
         result = mpr.WNetDisconnectDialog(wapi.NULL, mpr.RESOURCETYPE_DISK)  # Returns immediately.
         if result != mpr.NO_ERROR and result != -1 & 0xFFFF_FFFF:
             raise RuntimeError("`WNetDisconnectDialog()` failed.")
@@ -463,7 +463,7 @@ class _AppWizardCPLDialogs:
     """Undocumented functions."""
 
     @staticmethod
-    def new_link_here():
+    def new_link_here() -> None:
         fd, temp_file_path = tempfile.mkstemp(prefix="temp_shortcut_")
         os.close(fd)
         appwiz.NewLinkHereW(wapi.NULL, wapi.NULL, temp_file_path, win32con.SW_SHOWNORMAL)

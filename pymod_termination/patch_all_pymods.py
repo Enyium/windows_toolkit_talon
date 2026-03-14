@@ -9,7 +9,7 @@
 # _LOG_FILE_PATH = Path(__file__).resolve().with_suffix(".log")
 # _original_import = builtins.__import__
 # 
-# def _log(string: str):
+# def _log(string: str) -> None:
 #     with _LOG_FILE_PATH.open("a", encoding="utf-8") as file:
 #         file.write(string + "\n")
 # 

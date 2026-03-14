@@ -126,7 +126,7 @@ class MessageLoop:
             del self
 
             # Run loop.
-            def print_exception(self):
+            def print_exception(self) -> None:
                 print(
                     f"ERROR: Unhandled exception in thread of {self.__label}:\n"
                     + textwrap.indent(traceback.format_exc().rstrip(), "  ")
@@ -203,7 +203,7 @@ class MessageLoop:
 
         with self.__lock:
             if not self.__thread:
-                return None
+                return
 
             MessageLoop.__finalize_thread(self.__thread.native_id, self.__must_quit_asap_event, asap)
             self.__thread_finalizer.detach()
@@ -215,7 +215,7 @@ class MessageLoop:
         if wait:
             thread.join()
 
-    def __on_pymod_finalize(self):
+    def __on_pymod_finalize(self) -> None:
         self.quit(wait=False, asap=True)
 
     @staticmethod
