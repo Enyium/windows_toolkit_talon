@@ -63,7 +63,7 @@ def get_pymod_termination_hook(module_name: Optional[str] = None) -> Termination
 
     with _hooks_dict_lock:
         hook = _hooks_by_module_keys.get(module_key)
-        if not hook:
+        if hook is None:
             _hooks_by_module_keys[module_key] = hook = TerminationHook(module_object, module_key)
 
     return hook
@@ -214,7 +214,7 @@ class TerminationHook:
             while callbacks:
                 weak_callback = callbacks.popleft()
                 callback = weak_callback()
-                if callback:
+                if callback is not None:
                     try:
                         callback()
                     except BaseException:
@@ -293,7 +293,7 @@ class TeardownDeferrer:
         self.__entered = False
 
     def __enter__(self) -> Self:
-        if not self.__hook:
+        if self.__hook is None:
             raise RuntimeError(f"`{TeardownDeferrer.__name__}` already consumed.")
 
         self.__entered = True
@@ -308,7 +308,7 @@ class TeardownDeferrer:
     ) -> Optional[Literal[True]]:
         if not self.__entered:
             raise RuntimeError("`__exit__()` without previous `__enter__()`.")
-        if not self.__hook:
+        if self.__hook is None:
             raise RuntimeError(f"`{TeardownDeferrer.__name__}` already consumed.")
 
         self.__hook._do(TerminationHook._Command.DECREMENT_TEARDOWN_DEFERRERS)

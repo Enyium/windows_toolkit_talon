@@ -173,7 +173,7 @@ class WinEventListener:
                     raise RuntimeError(f"{tls.label} received win event 0x{event:04X} with unknown hook handle `{hWinEventHook}`.")
 
             callback = weak_callback()
-            if callback:
+            if callback is not None:
                 subscription_handle = int(wapi.cast("uintptr_t", hWinEventHook))
                 callback(subscription_handle, event, hwnd, idObject, idChild, idEventThread, dwmsEventTime)
             else:
@@ -205,13 +205,13 @@ class WinEventListener:
                 try:
                     future.result(timeout=2)
                 except Exception as e:
-                    if not unhook_exceptions:
+                    if unhook_exceptions is None:
                         unhook_exceptions = []
                     unhook_exceptions.append(e)
 
         self.__executor.shutdown(wait)
 
-        if unhook_exceptions:
+        if unhook_exceptions is not None:
             if len(unhook_exceptions) == 1:
                 raise unhook_exceptions[0]
             else:

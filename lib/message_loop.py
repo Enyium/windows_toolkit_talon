@@ -139,14 +139,14 @@ class MessageLoop:
                 #i `GetMessageW()` internally calls registered callbacks like those from hooks.
 
                 strong_self = weak_self()
-                if not strong_self:
+                if strong_self is None:
                     break
 
                 if strong_self.__must_quit_asap_event.is_set():
                     break
 
                 try:
-                    if not msg.hwnd:  # Thread message.
+                    if msg.hwnd == wapi.NULL:  # Thread message.
                         match msg.message:
                             case strong_self.__unique_message_id:
                                 call_weak(
@@ -165,15 +165,15 @@ class MessageLoop:
             strong_self = weak_self()
 
             try:
-                if downstream_on_thread_exit:
+                if downstream_on_thread_exit is not None:
                     downstream_on_thread_exit()
             except BaseException:
-                if strong_self:
+                if strong_self is not None:
                     print_exception(strong_self)
                 else:
                     raise
             finally:
-                if strong_self:
+                if strong_self is not None:
                     # Release any referenced objects.
                     strong_self.__downstream_on_thread_exit = None
 
@@ -186,7 +186,7 @@ class MessageLoop:
         """
 
         with self.__lock:
-            if not self.__thread:
+            if self.__thread is None:
                 raise RuntimeError(f"{self.__label} already quit.")
 
             success = user32.PostThreadMessageW(
@@ -209,7 +209,7 @@ class MessageLoop:
         """
 
         with self.__lock:
-            if not self.__thread:
+            if self.__thread is None:
                 return
 
             MessageLoop.__finalize_thread(cast(int, self.__thread.native_id), self.__must_quit_asap_event, asap)
@@ -365,7 +365,7 @@ class MessageLoopExecutor(Executor):
         label: str,
     ):
         try:
-            if downstream_on_thread_exit:
+            if downstream_on_thread_exit is not None:
                 downstream_on_thread_exit()
             #i Calling this first ensures removing hooks and such will unburden the message queue from incoming events before possible `Future` done-callbacks run.
         finally:
@@ -377,7 +377,7 @@ class MessageLoopExecutor(Executor):
                 while pending_jobs:
                     _, future = pending_jobs.pop()  # From back to front.
 
-                    if not message:
+                    if message is None:
                         message = f"Thread of {label} exited."
 
                     try:

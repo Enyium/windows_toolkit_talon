@@ -107,7 +107,7 @@ def _schedule_retry(toplevel_window: Window) -> None:
 
     global _retry_job, _retry_start, _retry_window
 
-    if _retry_job:
+    if _retry_job is not None:
         TIMEOUT = 2.0
         if time.perf_counter() - _retry_start >= TIMEOUT:
             _retry_job = None
@@ -310,7 +310,7 @@ class _Detector:
                 case ExtraSource.OWNER:
                     if not is_std_dialog:
                         owner_window = _get_owner_window(toplevel_window)
-                        if owner_window and owner_window.app.pid == toplevel_window.app.pid:
+                        if owner_window is not None and owner_window.app.pid == toplevel_window.app.pid:
                             owner_framework = self.__check_cache_and_toplevel_window(
                                 owner_window, lambda _: None
                             )
@@ -368,7 +368,7 @@ class _Detector:
                     is_visible = user32.IsWindowVisible(wapi.cast("HWND", hwnd))  # Also checks ancestor visibility.
                     if not is_visible:
                         last_error = kernel32.GetLastError()
-                        if last_error:
+                        if last_error != winerror.ERROR_SUCCESS:
                             raise ctypes.WinError(last_error)
                     else:
                         has_visible_window = True
@@ -378,7 +378,7 @@ class _Detector:
                     control_id = user32.GetWindowLongPtrW(wapi.cast("HWND", hwnd), user32.GWLP_ID)
                     if control_id == 0:
                         last_error = kernel32.GetLastError()
-                        if last_error:
+                        if last_error != winerror.ERROR_SUCCESS:
                             raise ctypes.WinError(last_error)
             except (pywintypes.error, OSError) as e:
                 if e.winerror == winerror.ERROR_INVALID_WINDOW_HANDLE:
@@ -397,7 +397,7 @@ class _Detector:
                 framework = UIFramework.SWT
                 return done_retval
             if wants_winrt_xaml and child_class in _WINRT_XAML_CHILD_CLASSES:
-                # if _retry_job:
+                # if _retry_job is not None:
                 #     print(f"Duration until recognition: {(time.perf_counter() - _retry_start) * 1000:.0f} ms")
 
                 framework = UIFramework.WINRT_XAML
@@ -443,7 +443,7 @@ class _Detector:
             )
             if not window_module_handle:
                 last_error = kernel32.GetLastError()
-                if last_error:
+                if last_error != winerror.ERROR_SUCCESS:
                     raise ctypes.WinError(last_error)
 
         #TODO: WITH PYWIN32 MAINTAINERS: `OpenProcess()` is typed to return `int`, but actually returns `PyHANDLE`. Similarly, `EnumProcessModulesEx()` below accepts is typed to only accept `int`, but works with this `PyHANDLE`. Remove both casts when solved.
@@ -536,7 +536,7 @@ def _get_owner_window(window: Window) -> Optional[Window]:
         else:
             raise
 
-    windows = ui.windows(id=owner_hwnd)  # `NULL` simply yields nothing.
-    return windows[0] if windows else None  # Max. 1 item possible.
+    windows = ui.windows(id=owner_hwnd)  # `NULL` yields empty list.
+    return windows[0] if len(windows) == 1 else None  # Max. 1 item possible.
 
 _script_main()

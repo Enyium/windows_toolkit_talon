@@ -46,7 +46,7 @@ class WinEventTracker:
         listener_uuid4 = UUID("8b5e0d5c-629c-4f1b-9d29-a225b47a5529")
         try:
             old_listener = reload_resilience.pop_value(listener_uuid4)
-            if old_listener:
+            if old_listener is not None:
                 old_listener.shut_down(wait=False)
         except (KeyError, AttributeError, TypeError):  # Accounts for API changes.
             print(f"WARNING: The `{WinEventTracker.__name__}` class couldn't shut down its last `{WinEventListener.__name__}` (expected on Talon launch).")
@@ -422,11 +422,11 @@ class WinEventTracker:
             try:
                 self.__listener.unsubscribe(handle)
             except Exception as e:
-                if not exceptions:
+                if exceptions is None:
                     exceptions = []
                 exceptions.append(e)
 
-        if exceptions:
+        if exceptions is not None:
             if len(exceptions) == 1:
                 raise exceptions[0]
             else:
@@ -460,7 +460,7 @@ class Subfilter:
         if isinstance(self.events, (WinEvent, slice)):
             self.normalized_events = (self.events,)
         else:
-            if not self.events:
+            if len(self.events) <= 0:
                 raise ValueError("There must be at least one win event.")
             self.normalized_events = self.events
 

@@ -3,7 +3,7 @@
 # from pathlib import Path
 # import traceback
 # from types import ModuleType
-# from typing import Mapping, Optional, Sequence
+# from typing import cast, Mapping, Optional, Sequence
 # import win32api
 # 
 # from .py_module_termination import get_pymod_termination_hook
@@ -24,9 +24,10 @@
 #     level: int = 0,
 # ) -> ModuleType:
 #     try:
-#         importer_module_name = globals and globals.get("__name__")
-#         if importer_module_name and importer_module_name.startswith("user."):
-#             get_pymod_termination_hook(importer_module_name)
+#         if globals is not None:
+#             importer_module_name = cast(Optional[str], globals.get("__name__"))
+#             if importer_module_name is not None and importer_module_name.startswith("user."):
+#                 get_pymod_termination_hook(importer_module_name)
 #     except BaseException:
 #         _log(traceback.format_exc().rstrip())
 #         win32api.Beep(400, 50)  # Hz, ms.

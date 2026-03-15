@@ -205,7 +205,7 @@ def _wait_for_winevents(win_events: Union[WinEvent, Sequence[WinEvent]], timeout
     global _tracker
 
     with _lock:
-        if not _tracker:
+        if _tracker is None:
             raise RuntimeError("Can't wait without ongoing tracking.")
 
         active_tracker = _tracker
@@ -227,7 +227,7 @@ def _clean_up_tracker(may_exit_context: bool = True) -> None:
     cron.cancel(_tracker_cleanup_job)
     _tracker_cleanup_job = None
 
-    if _tracker:
+    if _tracker is not None:
         try:
             if may_exit_context:
                 _tracker.__exit__()
