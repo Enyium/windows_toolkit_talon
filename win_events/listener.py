@@ -104,7 +104,7 @@ class WinEventListener:
             else:
                 first_event = last_event = events
 
-            hook_handle = user32.SetWinEventHook(
+            hook_handle: CData = user32.SetWinEventHook(
                 first_event,
                 last_event,
                 wapi.NULL,  # Not required with `WINEVENT_OUTOFCONTEXT`.
@@ -145,7 +145,7 @@ class WinEventListener:
             except KeyError:
                 raise ValueError(f"{self.__label} couldn't find hook handle `{hook_handle}` among its registered hooks.")
 
-            success = user32.UnhookWinEvent(hook_handle)
+            success = bool(user32.UnhookWinEvent(hook_handle))
             if not success:
                 raise RuntimeError(f"{self.__label} failed to unhook from win events with hook handle `{hook_handle}`.")
 
@@ -177,7 +177,7 @@ class WinEventListener:
                 subscription_handle = int(wapi.cast("uintptr_t", hWinEventHook))
                 callback(subscription_handle, event, hwnd, idObject, idChild, idEventThread, dwmsEventTime)
             else:
-                success = user32.UnhookWinEvent(hWinEventHook)
+                success = bool(user32.UnhookWinEvent(hWinEventHook))
                 if not success:
                     raise RuntimeError(f"{tls.label} failed to unhook from win events with hook handle `{hWinEventHook}` after callback became unavailable.")
         except BaseException:
@@ -231,7 +231,7 @@ class WinEventListener:
             is_shut_down_event.set()
 
             for hook_handle in reversed(weak_callbacks_by_hook_handles.keys()):
-                success = user32.UnhookWinEvent(hook_handle)
+                success = bool(user32.UnhookWinEvent(hook_handle))
                 if not success:
                     print(f"WARNING: Couldn't remove win event hook with handle `{hook_handle}`.")
 

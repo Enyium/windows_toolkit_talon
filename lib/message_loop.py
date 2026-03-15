@@ -77,7 +77,7 @@ class MessageLoop:
 
         self.__lock = Lock()
 
-        self.__unique_message_id = user32.RegisterWindowMessageW("Talon.WindowsToolkit.MessageLoop.{4dbac389-d878-44b1-b358-17fa6cc04375}")
+        self.__unique_message_id: int = user32.RegisterWindowMessageW("Talon.WindowsToolkit.MessageLoop.{4dbac389-d878-44b1-b358-17fa6cc04375}")
         if not self.__unique_message_id:
             raise ctypes.WinError(kernel32.GetLastError())
         #i Combined with thread ID. Not `WM_USER+x`/`WM_APP+x`, because we don't know what Talon or user code might post to threads.
@@ -133,7 +133,7 @@ class MessageLoop:
                 )
 
             while True:
-                result = user32.GetMessageW(msg, wapi.NULL, 0, 0)
+                result: int = user32.GetMessageW(msg, wapi.NULL, 0, 0)
                 if result == -1:
                     raise ctypes.WinError(kernel32.GetLastError())
                 #i `GetMessageW()` internally calls registered callbacks like those from hooks.
@@ -189,13 +189,13 @@ class MessageLoop:
             if self.__thread is None:
                 raise RuntimeError(f"{self.__label} already quit.")
 
-            success = user32.PostThreadMessageW(
+            success = bool(user32.PostThreadMessageW(
                 self.__thread.native_id,
                 self.__unique_message_id,
                 arg_1,
                 arg_2,
                 #i CFFI may raise `OverflowError` for `WPARAM` or `LPARAM`.
-            )
+            ))
             if not success:
                 raise ctypes.WinError(kernel32.GetLastError())
 
@@ -230,9 +230,9 @@ class MessageLoop:
         if asap:
             asap_event.set()
 
-        success = user32.PostThreadMessageW(native_id, user32.WM_QUIT, 0, 0)
+        success = bool(user32.PostThreadMessageW(native_id, user32.WM_QUIT, 0, 0))
         if not success:
-            last_error = kernel32.GetLastError()
+            last_error: int = kernel32.GetLastError()
             if last_error == winerror.ERROR_INVALID_THREAD_ID:  # Already terminated.
                 pass
             else:

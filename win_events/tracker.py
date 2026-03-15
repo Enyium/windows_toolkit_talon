@@ -153,9 +153,9 @@ class WinEventTracker:
             else:
                 if hwnd != wapi.NULL:
                     kernel32.SetLastError(winerror.ERROR_SUCCESS)
-                    is_child = user32.IsChild(self.__inclusive_ancestor_hwnd, hwnd)
+                    is_child = bool(user32.IsChild(self.__inclusive_ancestor_hwnd, hwnd))
                     if not is_child:
-                        last_error = kernel32.GetLastError()
+                        last_error: int = kernel32.GetLastError()
                         if last_error != winerror.ERROR_SUCCESS:
                             raise ctypes.WinError(last_error)
 
@@ -195,7 +195,7 @@ class WinEventTracker:
 
                 iaccessible_address = wapi.new("void **")
                 acc_object_child_id_cffi_variant: Any = wapi.new("VARIANT *")
-                hresult = oleacc.AccessibleObjectFromEvent(
+                hresult: int = oleacc.AccessibleObjectFromEvent(
                     hwnd,
                     wapi.cast("DWORD", object_id),
                     wapi.cast("DWORD", child_id),

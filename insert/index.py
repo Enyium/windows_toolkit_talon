@@ -334,7 +334,7 @@ class _InsertSession:
         #i As per the `GetMessageW()` docs' remarks, sent messages are processed before all other events by default.
 
         kernel32.SetLastError(winerror.ERROR_SUCCESS)
-        success = user32.SendMessageTimeoutW(
+        success = bool(user32.SendMessageTimeoutW(
             insertion_hwnd,
             win32con.WM_NULL,
             0,
@@ -343,16 +343,16 @@ class _InsertSession:
             #i `SMTO_ABORTIFHUNG` is indicated by failure return value, but not by a specific error code. Since this case is rare, a fitting exception message is hard to phrase and blocking seems natural in this case, the `SMTO_ABORTIFHUNG` flag isn't used.
             2000,  # ms
             wapi.NULL,
-        )
+        ))
         if not success:
-            last_error = kernel32.GetLastError()
+            last_error: int = kernel32.GetLastError()
             if last_error == winerror.ERROR_TIMEOUT:
                 raise TimeoutError("Window took too long to react while yielding during text insertion.")
             else:
                 raise ctypes.WinError(last_error)
 
     def __enqueue_vk_event(self, vk: int, up: bool) -> None:
-        scancode = win32api.MapVirtualKey(vk, user32.MAPVK_VK_TO_VSC_EX)
+        scancode = cast(int, win32api.MapVirtualKey(vk, user32.MAPVK_VK_TO_VSC_EX))  # Typed incompletely.
         has_e0_extended_scan_code = (scancode & 0xFF00) == 0xE000
         #i - AI GPT-5.2 thinks `wScan` must not contain the extended-prefix. But the docs for `KEYEVENTF_EXTENDEDKEY` seem to say otherwise.
         #i - We just ignore 0 on missing translation, because we don't use `KEYEVENTF_SCANCODE`, but primarily rely on the virtual-key code. The scancode is just for maximizing compatibility.
@@ -441,7 +441,7 @@ class _InsertSession:
                 time.sleep(0.1)  # Failure may just be transient.
 
                 event.DUMMYUNIONNAME.ki.dwFlags |= win32con.KEYEVENTF_KEYUP
-                success = user32.SendInput(1, wapi.addressof(event), wapi.sizeof("INPUT"))
+                success = bool(user32.SendInput(1, wapi.addressof(event), wapi.sizeof("INPUT")))
                 if not success:
                     extra_message = " Emergency key-up also failed."
 
@@ -456,7 +456,7 @@ class _InsertSession:
 
         deadline = time.perf_counter() + 0.050 if may_retry else None
         while True:
-            success = user32.GetGUIThreadInfo(0, self.__gui_thread_info)
+            success = bool(user32.GetGUIThreadInfo(0, self.__gui_thread_info))
             if not success:
                 raise ctypes.WinError(kernel32.GetLastError())
 

@@ -199,13 +199,13 @@ class _Detector:
                     (_ASSESSMENT_TIME_NS_PROP_NAME, time.perf_counter_ns()),  # Dependent on 64-bit process.
                     #i Setting the UI framework first is important. If we'd set the assessment time first and then setting the UI framework failed, we would have presented the old UI framework value as valid in the current context.
                 ):
-                    success = user32.SetPropW(
+                    success = bool(user32.SetPropW(
                         wapi.cast("HWND", toplevel_window.id),
                         prop_name,
                         wapi.cast("HANDLE", value),
-                    )
+                    ))
                     if not success:
-                        last_error = kernel32.GetLastError()
+                        last_error: int = kernel32.GetLastError()
                         if last_error == winerror.ERROR_INVALID_WINDOW_HANDLE:
                             break
                         else:
@@ -365,9 +365,9 @@ class _Detector:
 
                 if not has_visible_window or _MUST_LOG_CHILD_WINDOWS:
                     kernel32.SetLastError(winerror.ERROR_SUCCESS)
-                    is_visible = user32.IsWindowVisible(wapi.cast("HWND", hwnd))  # Also checks ancestor visibility.
+                    is_visible = bool(user32.IsWindowVisible(wapi.cast("HWND", hwnd)))  # Also checks ancestor visibility.
                     if not is_visible:
-                        last_error = kernel32.GetLastError()
+                        last_error: int = kernel32.GetLastError()
                         if last_error != winerror.ERROR_SUCCESS:
                             raise ctypes.WinError(last_error)
                     else:
@@ -375,9 +375,9 @@ class _Detector:
 
                 if _MUST_LOG_CHILD_WINDOWS:
                     kernel32.SetLastError(winerror.ERROR_SUCCESS)
-                    control_id = user32.GetWindowLongPtrW(wapi.cast("HWND", hwnd), user32.GWLP_ID)
+                    control_id: int = user32.GetWindowLongPtrW(wapi.cast("HWND", hwnd), user32.GWLP_ID)
                     if control_id == 0:
-                        last_error = kernel32.GetLastError()
+                        last_error: int = kernel32.GetLastError()
                         if last_error != winerror.ERROR_SUCCESS:
                             raise ctypes.WinError(last_error)
             except (pywintypes.error, OSError) as e:
@@ -433,7 +433,7 @@ class _Detector:
         wants_gtk = possible_frameworks is None or UIFramework.GTK in possible_frameworks
         wants_any_framework = possible_frameworks is None or len(possible_frameworks) != 0
 
-        window_module_handle = None
+        window_module_handle: Optional[int] = None
         if wants_dialog_check:
             # Find out module that created the window.
             kernel32.SetLastError(winerror.ERROR_SUCCESS)
@@ -442,7 +442,7 @@ class _Detector:
                 user32.GWLP_HINSTANCE
             )
             if not window_module_handle:
-                last_error = kernel32.GetLastError()
+                last_error: int = kernel32.GetLastError()
                 if last_error != winerror.ERROR_SUCCESS:
                     raise ctypes.WinError(last_error)
 
@@ -456,23 +456,23 @@ class _Detector:
 
         plausibly_std_dialog = False
         try:
-            module_handles = win32process.EnumProcessModulesEx(
+            module_handles = cast(tuple[int, ...], win32process.EnumProcessModulesEx(  # Typed incompletely.
                 cast(int, process_pyhandle),
                 win32process.LIST_MODULES_ALL,
-            )
+            ))
 
             filename_buffer = wapi.new("WCHAR[]", 256)
             #i Maximum path *component* length as per <https://learn.microsoft.com/en-us/windows/win32/fileio/maximum-file-path-limitation>.
 
             for module_handle in module_handles:
-                utf16_length = kernel32.K32GetModuleBaseNameW(
+                utf16_length: int = kernel32.K32GetModuleBaseNameW(
                     process_handle,
                     wapi.cast("HMODULE", module_handle),
                     filename_buffer,
                     len(filename_buffer),
                 )
                 if not utf16_length:
-                    last_error = kernel32.GetLastError()
+                    last_error: int = kernel32.GetLastError()
                     if last_error == winerror.ERROR_INVALID_HANDLE:
                     #i When aggressively loading and unloading DLLs in a test process with a window, this was the only error that occurred; i.e., `EnumProcessModulesEx()` didn't fail. The error is obviously related to unloading a module; when a module was *loaded* while `EnumProcessModulesEx()` ran and wasn't returned, that case must be seen as similar to running this code a few milliseconds earlier when the module also wasn't loaded and apparently can't be handled the same as the unload case.
                         # Give process a bit of time to settle.

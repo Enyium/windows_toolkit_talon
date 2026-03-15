@@ -32,7 +32,7 @@ def _script_main() -> None:
                 _show_dialogs()
 
         case "pythonw.exe" | "python.exe":
-            success = user32.SetProcessDpiAwarenessContext(wapi.cast("DPI_AWARENESS_CONTEXT", user32.DPI_AWARENESS_CONTEXT_PER_MONITOR_AWARE_V2))
+            success = bool(user32.SetProcessDpiAwarenessContext(wapi.cast("DPI_AWARENESS_CONTEXT", user32.DPI_AWARENESS_CONTEXT_PER_MONITOR_AWARE_V2)))
             if not success:
                 raise ctypes.WinError(kernel32.GetLastError())
 
@@ -140,7 +140,7 @@ class _WinuserDialogs:
 
     @staticmethod
     def message_box_min() -> None:
-        button = user32.MessageBoxW(
+        button: int = user32.MessageBoxW(
             wapi.NULL,
             wapi.NULL,
             "MessageBoxW()",
@@ -164,7 +164,7 @@ class _WinuserDialogs:
             # win32con.MB_YESNOCANCEL
         )
 
-        button = user32.MessageBoxW(
+        button: int = user32.MessageBoxW(
             wapi.NULL,
             "Message with\n\nmultiple lines.",
             "MessageBoxW()",
@@ -182,7 +182,7 @@ class _ControlLibraryDialogs:
         config: Any = wapi.new("TASKDIALOGCONFIG *")
         config.cbSize = wapi.sizeof("TASKDIALOGCONFIG")
 
-        hresult = comctl32.TaskDialogIndirect(
+        hresult: int = comctl32.TaskDialogIndirect(
             config,
             wapi.NULL,
             wapi.NULL,
@@ -273,7 +273,7 @@ class _ControlLibraryDialogs:
         config.cxWidth = 0
 
         verification_flag_checked = wapi.new("BOOL *")
-        hresult = comctl32.TaskDialogIndirect(
+        hresult: int = comctl32.TaskDialogIndirect(
             config,
             wapi.NULL,
             wapi.NULL,
@@ -302,7 +302,7 @@ class _ControlLibraryDialogs:
         content = w("<>\nThe file name is not valid.")
         config.pszContent = content
 
-        hresult = comctl32.TaskDialogIndirect(
+        hresult: int = comctl32.TaskDialogIndirect(
             config,
             wapi.NULL,
             wapi.NULL,
@@ -411,17 +411,17 @@ class _WNetDialogs:
 
     @staticmethod
     def wnet_connection_dialog() -> None:
-        result = mpr.WNetConnectionDialog(wapi.NULL, mpr.RESOURCETYPE_DISK)
+        result: int = mpr.WNetConnectionDialog(wapi.NULL, mpr.RESOURCETYPE_DISK)
         if result != mpr.NO_ERROR and result != -1 & 0xFFFF_FFFF:
             raise RuntimeError("`WNetConnectionDialog()` failed.")
 
     @staticmethod
     def wnet_disconnect_dialog() -> None:
-        result = mpr.WNetDisconnectDialog(wapi.NULL, mpr.RESOURCETYPE_DISK)  # Returns immediately.
+        result: int = mpr.WNetDisconnectDialog(wapi.NULL, mpr.RESOURCETYPE_DISK)  # Returns immediately.
         if result != mpr.NO_ERROR and result != -1 & 0xFFFF_FFFF:
             raise RuntimeError("`WNetDisconnectDialog()` failed.")
 
-        button = user32.MessageBoxW(
+        button: int = user32.MessageBoxW(
             wapi.NULL,
             'This message box keeps the "Disconnect Network Drives"/WNetDisconnectDialog() dialog alive.',
             "Life Support",
