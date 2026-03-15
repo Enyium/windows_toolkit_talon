@@ -313,7 +313,7 @@ class MessageLoopExecutor(Executor):
         func: Callable[P, T],
         /,
         *args: P.args,
-        timeout: Optional[float] = None,
+        timeout: Optional[float] = None,  # pyright: ignore[reportGeneralTypeIssues]
         **kwargs: P.kwargs,
     ) -> T:
         """Convenience function that synchronously calls a function in the message loop thread by calling `submit()` and waiting for the `Future` to complete."""

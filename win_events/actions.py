@@ -30,7 +30,7 @@ _ctx = Context()
 _ctx.matches = """
 os: windows
 tag: user.wtk_tracking__active
-"""
+"""  # pyright: ignore[reportAttributeAccessIssue]
 
 _lock = Lock()
 _tracker: Optional[WinEventTracker] = None

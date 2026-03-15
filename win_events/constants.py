@@ -19,7 +19,7 @@ class _FromStrMixin:
     @classmethod
     def from_str(cls, name: str) -> Self:
         try:
-            return cls.__members__[name]
+            return cls.__members__[name]  # pyright: ignore[reportAttributeAccessIssue]
         except KeyError:
             label, prefix = cls._get_label_and_prefix()
             raise ValueError(

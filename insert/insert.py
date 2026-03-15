@@ -76,9 +76,9 @@ _mod.setting(
 )
 
 _ctx = Context()
-_ctx.matches = r"""
+_ctx.matches = """
 tag: user.wtk_insert__active
-"""
+"""  # pyright: ignore[reportAttributeAccessIssue]
 
 _INSERTION_TIMEOUT = 30
 """Seconds until a single insertion session is aborted."""
