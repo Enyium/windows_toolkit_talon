@@ -1,11 +1,12 @@
 from cffi import FFI
-from typing import Optional
+from typing import cast, Optional
 
 wapi = FFI()
 CData = wapi.CData
 
-def w(string: Optional[str]):
-    return wapi.NULL if string is None else wapi.new("WCHAR[]", string)
+def w(string: Optional[str]) -> CData:
+    return cast(CData, wapi.NULL) if string is None else wapi.new("WCHAR[]", string)
+    #i `FFI.NULL` from CFFI v1.15's `api.pyi` is typed as `CType`, although it's `isinstance(wapi.NULL, wapi.CData)` that returns `True`.
 
 GENERAL_WAPI_SOURCE = r"""
     #define S_OK                                   0L

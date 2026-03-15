@@ -7,7 +7,7 @@ import math
 from threading import Condition, Lock
 import time
 from types import TracebackType
-from typing import Literal, Optional, Self, Sequence, TYPE_CHECKING, Union
+from typing import Callable, cast, Literal, Optional, Self, Sequence, TYPE_CHECKING, Union
 from uuid import UUID
 
 from talon import app
@@ -27,7 +27,7 @@ if app.platform == "windows" or TYPE_CHECKING:
 else:
     raise NotImplementedError("Unsupported OS.")
 
-_script_main_callbacks = deque()
+_script_main_callbacks: deque[Callable[[], None]] = deque()
 
 def _script_main() -> None:
     while _script_main_callbacks:
@@ -394,7 +394,7 @@ class WinEventTracker:
             and len(subfilter_events := self.__subfilters[0].normalized_events) == 1
             and isinstance(subfilter_events[0], WinEvent)  # Single event, not slice.
         ):
-            events = subfilter_events
+            events = cast(Sequence[WinEvent], subfilter_events)
         else:
             raise ValueError("Win events are only optional when the instance was created with exactly one.")
 

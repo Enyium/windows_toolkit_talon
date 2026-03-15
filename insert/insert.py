@@ -5,9 +5,9 @@ Reimplements Talon's `insert()` function and provides Talon settings that allow 
 from contextlib import nullcontext
 import ctypes
 import time
-from typing import TYPE_CHECKING
+from typing import cast, Optional, TYPE_CHECKING
 
-from talon import Context, Module, app, settings, ui
+from talon import Context, Module, app, settings
 
 if app.platform == "windows" or TYPE_CHECKING:
     import win32api
@@ -130,22 +130,22 @@ class _InsertSession:
     def __init__(self) -> None:
         self.__deadline = None
 
-        self.__must_yield_time = settings.get("user.wtk_insert__yield_time")
-        self.__caret_still_duration = max(0, settings.get("user.wtk_insert__caret_still_ms") / 1000)
-        self.__must_wait_before_supp_char = settings.get("user.wtk_insert__caret_still_before_supp_char")
-        self.__must_wait_before_tab = settings.get("user.wtk_insert__caret_still_before_tab")
-        self.__must_wait_before_enter = settings.get("user.wtk_insert__caret_still_before_enter")
-        self.__must_wait_before_backspace = settings.get("user.wtk_insert__caret_still_before_backspace")
-        self.__must_wait_before_esc = settings.get("user.wtk_insert__caret_still_before_esc")
-        self.__must_wait_at_end = settings.get("user.wtk_insert__caret_still_at_end")
+        self.__must_yield_time = cast(bool, settings.get("user.wtk_insert__yield_time"))
+        self.__caret_still_duration = max(0, cast(float, settings.get("user.wtk_insert__caret_still_ms")) / 1000)
+        self.__must_wait_before_supp_char = cast(bool, settings.get("user.wtk_insert__caret_still_before_supp_char"))
+        self.__must_wait_before_tab = cast(bool, settings.get("user.wtk_insert__caret_still_before_tab"))
+        self.__must_wait_before_enter = cast(bool, settings.get("user.wtk_insert__caret_still_before_enter"))
+        self.__must_wait_before_backspace = cast(bool, settings.get("user.wtk_insert__caret_still_before_backspace"))
+        self.__must_wait_before_esc = cast(bool, settings.get("user.wtk_insert__caret_still_before_esc"))
+        self.__must_wait_at_end = cast(bool, settings.get("user.wtk_insert__caret_still_at_end"))
 
         self.__events = None
-        self.__num_events = 0
+        self.__num_events: int = 0
 
         self.__gui_thread_info = wapi.new("GUITHREADINFO *", {"cbSize": wapi.sizeof("GUITHREADINFO")})
-        self.__insertion_toplevel_hwnd = None
-        self.__insertion_hwnd = None
-        self.__interference_tracker = None
+        self.__insertion_toplevel_hwnd: Optional[CData] = None
+        self.__insertion_hwnd: Optional[CData] = None
+        self.__interference_tracker: Optional[WinEventTracker] = None
 
     def __call__(self, text: str) -> None:
         if not text:
@@ -231,7 +231,7 @@ class _InsertSession:
         # Create event queue.
         CODE_UNITS_PER_FLUSH_HINT = 50
         capacity = (CODE_UNITS_PER_FLUSH_HINT + 1) * 2
-        #i One more, because a surrogate pair can lie on the edge and they're enqueued atomically. Down and up for every code unit.
+        #i One more because a surrogate pair can lie on the edge and they're enqueued atomically. Down and up for every code unit.
         self.__events = wapi.new("INPUT[]", capacity)
         self.__num_events = 0
 
@@ -420,7 +420,7 @@ class _InsertSession:
             raise RuntimeError("Mouse key held down. Text insertion aborted.")
 
         # Send queued events.
-        num_events_sent = user32.SendInput(self.__num_events, self.__events, wapi.sizeof("INPUT"))
+        num_events_sent: int = user32.SendInput(self.__num_events, self.__events, wapi.sizeof("INPUT"))
         if not num_events_sent:
             raise ctypes.WinError(kernel32.GetLastError())
         #i `SendInput()` can take a considerable amount of time (like > 1 s for long text). Its return time seems to correlate with the time where the foreground thread's message queue already received the events or will receive them briefly after (not guaranteed though). After that, text display can lag significantly as the app processes the messages in its queue (e.g., in Notepad and gImageReader).

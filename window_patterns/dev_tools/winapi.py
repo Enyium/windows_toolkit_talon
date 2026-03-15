@@ -5,7 +5,7 @@ from ...lib import winapi as lib_winapi
 wapi = FFI()
 wapi.cdef(lib_winapi.GENERAL_WAPI_SOURCE)
 
-# def MAKEINTRESOURCEW(i):
+# def MAKEINTRESOURCEW(i: int) -> CData:
 #     return wapi.cast("LPWSTR", i & 0xFFFF)
 
 appwiz = wapi.dlopen("appwiz.cpl")

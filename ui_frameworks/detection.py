@@ -11,10 +11,10 @@ import textwrap
 from threading import Lock
 import time
 import traceback
-from typing import Callable, Optional, TYPE_CHECKING
+from typing import Callable, cast, Optional, TYPE_CHECKING
 
 from talon import Module, app, cron, ui
-from talon.ui import Window
+from talon.windows.ui import Window
 
 from .enum import UIFramework
 
@@ -143,7 +143,7 @@ def _update_scope(toplevel_window: Window) -> None:
     _ui_framework_scope.update()
 
 @_mod.scope
-def _ui_framework_scope():
+def _ui_framework_scope() -> dict[str, str]:
     return {"ui_framework": str(_framework)}
 
 
@@ -241,7 +241,7 @@ class _Detector:
 
         extra_sources = (ExtraSource.CHILD_WINDOW_TREE,)
         is_dialog = False
-        expected_module_based_frameworks = frozenset()  # Not any. Only after other hints.
+        expected_module_based_frameworks: set[UIFramework] = set()  # Not any. Only after other hints.
 
         toplevel_class = toplevel_window.cls  # Win32 class name.
         match toplevel_class:
@@ -354,7 +354,7 @@ class _Detector:
         has_visible_window = False
         done_retval = not _MAY_ABORT_CHILD_WINDOW_LOOP_EARLY  # `False` breaks loop.
 
-        def handle_child_window(hwnd, _):
+        def handle_child_window(hwnd: int, _) -> bool:
             nonlocal framework, has_children, has_visible_window
 
             try:
@@ -442,16 +442,17 @@ class _Detector:
                 if last_error:
                     raise ctypes.WinError(last_error)
 
-        process_handle = win32api.OpenProcess(
+        #TODO: WITH PYWIN32 MAINTAINERS: `OpenProcess()` is typed to return `int`, but actually returns `PyHANDLE`. Similarly, `EnumProcessModulesEx()` below accepts is typed to only accept `int`, but works with this `PyHANDLE`. Remove both casts when solved.
+        process_pyhandle = cast(pywintypes.HANDLEType, win32api.OpenProcess(
             win32con.PROCESS_QUERY_INFORMATION | win32con.PROCESS_VM_READ,
             False,
             toplevel_window.app.pid,
-        )
+        ))
 
         plausibly_std_dialog = False
         try:
             module_handles = win32process.EnumProcessModulesEx(
-                process_handle,
+                cast(int, process_pyhandle),
                 win32process.LIST_MODULES_ALL,
             )
 
@@ -460,7 +461,7 @@ class _Detector:
 
             for module_handle in module_handles:
                 success = kernel32.K32GetModuleBaseNameW(
-                    wapi.cast("HANDLE", process_handle.handle),
+                    wapi.cast("HANDLE", process_pyhandle.handle),
                     wapi.cast("HMODULE", module_handle),
                     filename_buffer,
                     len(filename_buffer),
@@ -473,7 +474,7 @@ class _Detector:
                         return (UIFramework.PENDING, plausibly_std_dialog)
                     else:
                         raise ctypes.WinError(last_error)
-                filename = wapi.string(filename_buffer).lower()
+                filename = cast(str, wapi.string(filename_buffer)).lower()
 
                 if wants_gtk and _gtk_dll_regex.search(filename):
                     return (UIFramework.GTK, plausibly_std_dialog)
@@ -494,7 +495,7 @@ class _Detector:
                     if not wants_any_framework:
                         break
         finally:
-            process_handle.Close()
+            process_pyhandle.Close()
 
         return (UIFramework.UNKNOWN, plausibly_std_dialog)
 

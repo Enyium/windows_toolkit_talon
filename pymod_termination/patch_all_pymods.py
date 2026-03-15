@@ -2,6 +2,8 @@
 # import functools
 # from pathlib import Path
 # import traceback
+# from types import ModuleType
+# from typing import Mapping, Optional, Sequence
 # import win32api
 # 
 # from .py_module_termination import get_pymod_termination_hook
@@ -14,7 +16,13 @@
 #         file.write(string + "\n")
 # 
 # @functools.wraps(_original_import)
-# def _patched_import(name, globals=None, locals=None, fromlist=(), level=0):
+# def _patched_import(
+#     name: str,
+#     globals: Optional[Mapping[str, object]] = None,
+#     locals: Optional[Mapping[str, object]] = None,
+#     fromlist: Optional[Sequence[str]] = (),
+#     level: int = 0,
+# ) -> ModuleType:
 #     try:
 #         importer_module_name = globals and globals.get("__name__")
 #         if importer_module_name and importer_module_name.startswith("user."):

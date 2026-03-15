@@ -1,4 +1,5 @@
 from enum import IntEnum
+from typing import Self
 
 class StrCarryingOneBasedIntEnum(IntEnum):
     """An enum with the following features:
@@ -7,7 +8,7 @@ class StrCarryingOneBasedIntEnum(IntEnum):
     - While the instances behave like `int`s, stringifying them yields the strings you assigned.
     """
 
-    def __new__(cls, string: str):
+    def __new__(cls, string: str) -> Self:
         value = len(cls) + 1
 
         obj = int.__new__(cls, value)

@@ -9,6 +9,7 @@ import subprocess
 import sys
 import tempfile
 from threading import Thread
+from typing import Callable, TextIO
 import win32con
 import win32api
 
@@ -57,7 +58,7 @@ def _show_dialogs() -> None:
     # _spawn_dialog_subprocess(_AppWizardCPLDialogs.new_link_here)
 
 
-def _spawn_dialog_subprocess(static_method) -> None:
+def _spawn_dialog_subprocess(static_method: Callable[[], None]) -> None:
     """Spawns a child Python process running this script file and tells it to show the specified dialog, so the dialog can't block Talon and spy tools don't have problems spying on the window as some do, perhaps because of Talon's UIAccess privileges."""
 
     env = os.environ.copy()
@@ -97,7 +98,7 @@ def _spawn_dialog_subprocess(static_method) -> None:
     if process.stdout is None:
         raise RuntimeError("Stdout pipe didn't work.")
 
-    def transfer_lines(source_stream, target_stream, line_prefix: str) -> None:
+    def transfer_lines(source_stream: TextIO, target_stream: TextIO, line_prefix: str) -> None:
         for line in iter(source_stream.readline, ""):
             target_stream.write(line_prefix + line)
             #i Line already ends with newline character.

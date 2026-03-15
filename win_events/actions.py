@@ -1,5 +1,5 @@
 from threading import Lock
-from typing import Optional, Sequence, Union
+from typing import cast, Optional, Sequence, Union
 
 from talon import actions, Context, cron, Module, settings, ui
 from talon.cron import Job
@@ -97,7 +97,7 @@ class _UserActions:
     def wait_for_window_activation(fixed_fallback_duration: Union[float, str]) -> None:
         _wait_for_winevents(
             WinEvent.SYSTEM_FOREGROUND,
-            timeout=settings.get("user.wtk_tracking__window_activation_timeout"),
+            timeout=cast(float, settings.get("user.wtk_tracking__window_activation_timeout")),
         )
 
     @staticmethod
@@ -137,7 +137,7 @@ class _UserActions:
     def wait_for_focus(fixed_fallback_duration: Union[float, str]) -> None:
         _wait_for_winevents(
             (WinEvent.OBJECT_FOCUS, WinEvent.OBJECT_LOCATIONCHANGE),
-            timeout=settings.get("user.wtk_tracking__focus_timeout"),
+            timeout=cast(float, settings.get("user.wtk_tracking__focus_timeout")),
         )
 
 

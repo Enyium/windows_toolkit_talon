@@ -75,7 +75,7 @@ class _ModuleKey:
     dict_id: int
     """The `__dict__`'s instead of the module object's ID, because IDs may be reused after garbage collection and only the `__dict__` survives until teardown is complete."""
 
-    def __str__(self):
+    def __str__(self) -> str:
         return f"module `{self.name}` with `__dict__` at 0x{self.dict_id:X}"
 
 

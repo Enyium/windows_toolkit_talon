@@ -9,7 +9,7 @@ import functools
 import textwrap
 from threading import Event, Lock, Thread
 import traceback
-from typing import Callable, Optional, ParamSpec, Self, TYPE_CHECKING, TypeAlias, TypeVar
+from typing import Callable, cast, Optional, ParamSpec, TYPE_CHECKING, TypeAlias, TypeVar
 from uuid import UUID
 import weakref
 from weakref import ReferenceType
@@ -105,7 +105,7 @@ class MessageLoop:
             raise TimeoutError(f"Thread of {self.__label} didn't become ready before timeout.")
 
     @staticmethod
-    def __thread_main(weak_self: ReferenceType[Self]) -> None:
+    def __thread_main(weak_self: ReferenceType["MessageLoop"]) -> None:
         # Initialize.
         self = weak_self()
         assert type(self) is MessageLoop
@@ -205,7 +205,7 @@ class MessageLoop:
             if not self.__thread:
                 return
 
-            MessageLoop.__finalize_thread(self.__thread.native_id, self.__must_quit_asap_event, asap)
+            MessageLoop.__finalize_thread(cast(int, self.__thread.native_id), self.__must_quit_asap_event, asap)
             self.__thread_finalizer.detach()
             #i Since the finalizer acts after garbage collection of `self` and this method references `self`, there's no race condition with the finalizer.
 
