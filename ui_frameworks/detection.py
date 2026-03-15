@@ -360,6 +360,8 @@ class _Detector:
 
             try:
                 child_class = win32gui.GetClassName(hwnd)
+                if child_class is None:
+                    raise RuntimeError("Couldn't retrieve window class name.")
 
                 if not has_visible_window or _MUST_LOG_CHILD_WINDOWS:
                     kernel32.SetLastError(winerror.ERROR_SUCCESS)
