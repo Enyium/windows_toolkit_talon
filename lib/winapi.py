@@ -1,5 +1,5 @@
 from cffi import FFI
-from typing import cast, Optional
+from typing import Any, cast, Optional
 
 wapi = FFI()
 CData = wapi.CData
@@ -19,7 +19,7 @@ GENERAL_WAPI_SOURCE = r"""
 """Code for reuse."""
 wapi.cdef(GENERAL_WAPI_SOURCE)
 
-kernel32 = wapi.dlopen("kernel32.dll")
+kernel32: Any = wapi.dlopen("kernel32.dll")
 wapi.cdef(r"""
     DWORD WINAPI GetTickCount(VOID);
     DWORD WINAPI K32GetModuleBaseNameW(
@@ -30,7 +30,7 @@ wapi.cdef(r"""
     );
 """)
 
-oleacc = wapi.dlopen("oleacc.dll")
+oleacc: Any = wapi.dlopen("oleacc.dll")
 wapi.cdef(r"""
     typedef unsigned short VARTYPE;
 
@@ -123,7 +123,7 @@ wapi.cdef(r"""
     #define	ROLE_SYSTEM_OUTLINEBUTTON	0x40
 """)
 
-user32 = wapi.dlopen("user32.dll")
+user32: Any = wapi.dlopen("user32.dll")
 wapi.cdef(r"""
     // `MapVirtualKeyW()` constants missing in `pywin32`.
     #define MAPVK_VK_TO_VSC_EX  4

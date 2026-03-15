@@ -1,4 +1,5 @@
 from cffi import FFI
+from typing import Any
 
 from ...lib import winapi as lib_winapi
 
@@ -8,7 +9,7 @@ wapi.cdef(lib_winapi.GENERAL_WAPI_SOURCE)
 # def MAKEINTRESOURCEW(i: int) -> CData:
 #     return wapi.cast("LPWSTR", i & 0xFFFF)
 
-appwiz = wapi.dlopen("appwiz.cpl")
+appwiz: Any = wapi.dlopen("appwiz.cpl")
 wapi.cdef(r"""
     void WINAPI NewLinkHereW(
         HWND hwnd,
@@ -19,7 +20,7 @@ wapi.cdef(r"""
     //i Source for signature: <https://github.com/selfrender/Windows-Server-2003/blob/master/shell/cpls/appwzdui/appwiz.c#L617>.
 """)
 
-comctl32 = wapi.dlopen("comctl32.dll")
+comctl32: Any = wapi.dlopen("comctl32.dll")
 wapi.cdef(pack=1, csource=r"""
     //i `cdef()` argument `pack=1` required by source's `#include <pshpack1.h>`.
 
@@ -124,16 +125,16 @@ wapi.cdef(pack=1, csource=r"""
     );
 """)
 
-kernel32 = wapi.dlopen("kernel32.dll")
+kernel32: Any = wapi.dlopen("kernel32.dll")
 
-mpr = wapi.dlopen("mpr.dll")
+mpr: Any = wapi.dlopen("mpr.dll")
 wapi.cdef(r"""
     #define RESOURCETYPE_DISK       0x00000001
     DWORD WINAPI WNetConnectionDialog(HWND hwnd, DWORD dwType);
     DWORD WINAPI WNetDisconnectDialog(HWND hwnd, DWORD dwType);
 """)
 
-user32 = wapi.dlopen("user32.dll")
+user32: Any = wapi.dlopen("user32.dll")
 wapi.cdef(r"""
     // `MessageBoxW()`.
     #define MB_CANCELTRYCONTINUE        0x00000006L

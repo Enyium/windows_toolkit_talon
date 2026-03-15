@@ -5,7 +5,7 @@ Reimplements Talon's `insert()` function and provides Talon settings that allow 
 from contextlib import nullcontext
 import ctypes
 import time
-from typing import cast, Optional, TYPE_CHECKING
+from typing import Any, cast, Optional, TYPE_CHECKING
 
 from talon import Context, Module, app, settings
 
@@ -139,10 +139,10 @@ class _InsertSession:
         self.__must_wait_before_esc = cast(bool, settings.get("user.wtk_insert__caret_still_before_esc"))
         self.__must_wait_at_end = cast(bool, settings.get("user.wtk_insert__caret_still_at_end"))
 
-        self.__events = None
+        self.__events: Any = None
         self.__num_events: int = 0
 
-        self.__gui_thread_info = wapi.new("GUITHREADINFO *", {"cbSize": wapi.sizeof("GUITHREADINFO")})
+        self.__gui_thread_info: Any = wapi.new("GUITHREADINFO *", {"cbSize": wapi.sizeof("GUITHREADINFO")})
         self.__insertion_toplevel_hwnd: Optional[CData] = None
         self.__insertion_hwnd: Optional[CData] = None
         self.__interference_tracker: Optional[WinEventTracker] = None
@@ -355,7 +355,7 @@ class _InsertSession:
         #i - AI GPT-5.2 thinks `wScan` must not contain the extended-prefix. But the docs for `KEYEVENTF_EXTENDEDKEY` seem to say otherwise.
         #i - We just ignore 0 on missing translation, because we don't use `KEYEVENTF_SCANCODE`, but primarily rely on the virtual-key code. The scancode is just for maximizing compatibility.
 
-        event = self.__events[self.__num_events]
+        event: Any = self.__events[self.__num_events]
 
         event.type = win32con.INPUT_KEYBOARD
         event.DUMMYUNIONNAME.ki.wVk = vk
@@ -374,7 +374,7 @@ class _InsertSession:
         self.__num_events += 1
 
     def __enqueue_utf16_code_unit_event(self, code_unit: int, up: bool) -> None:
-        event = self.__events[self.__num_events]
+        event: Any = self.__events[self.__num_events]
 
         event.type = win32con.INPUT_KEYBOARD
         event.DUMMYUNIONNAME.ki.wVk = 0
@@ -428,7 +428,7 @@ class _InsertSession:
         if num_events_sent != self.__num_events:
             # Best-effort emergency key-up. (Only as long as modifiers aren't involved additionally.)
             try:
-                event = self.__events[num_events_sent - 1]
+                event: Any = self.__events[num_events_sent - 1]
             except IndexError:
                 pass
 
@@ -463,7 +463,7 @@ class _InsertSession:
 
             time.sleep(0.005)
 
-    def __get_insertion_hwnd(self, gui_thread_info: CData) -> CData:
+    def __get_insertion_hwnd(self, gui_thread_info: Any) -> CData:
         """Retrieves the specific `HWND` that'll also receive the `SendInput()` events from the OS."""
 
         return gui_thread_info.hwndFocus or gui_thread_info.hwndActive

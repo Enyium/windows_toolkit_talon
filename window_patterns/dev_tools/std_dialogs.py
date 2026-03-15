@@ -9,7 +9,7 @@ import subprocess
 import sys
 import tempfile
 from threading import Thread
-from typing import Callable, TextIO
+from typing import Any, Callable, TextIO
 import win32con
 import win32api
 
@@ -179,7 +179,7 @@ class _ControlLibraryDialogs:
 
     @staticmethod
     def task_dialog_min() -> None:
-        config = wapi.new("TASKDIALOGCONFIG *")
+        config: Any = wapi.new("TASKDIALOGCONFIG *")
         config.cbSize = wapi.sizeof("TASKDIALOGCONFIG")
 
         hresult = comctl32.TaskDialogIndirect(
@@ -196,7 +196,7 @@ class _ControlLibraryDialogs:
     def task_dialog_max() -> None:
         """Try commenting in some code inside."""
 
-        config = wapi.new("TASKDIALOGCONFIG *")
+        config: Any = wapi.new("TASKDIALOGCONFIG *")
         config.cbSize = wapi.sizeof("TASKDIALOGCONFIG")
         config.hwndParent = wapi.NULL
         config.hInstance = wapi.NULL
@@ -286,7 +286,7 @@ class _ControlLibraryDialogs:
     def task_dialog_like_message_box() -> None:
         """The `MessageBoxW()` dialog doesn't contain DirectUI elements. However, the message box shown when Windows' open- or save-dialog complains about an invalid filename does. They are very similar to each other. The message box this method shows has an identical child window tree to the latter, but additionally shows an icon in the title bar. So, it also shouldn't be what the open- or save-dialog uses. However, both are created by `comctl32.dll`. So, maybe, there's something we're overlooking."""
 
-        config = wapi.new("TASKDIALOGCONFIG *")
+        config: Any = wapi.new("TASKDIALOGCONFIG *")
         config.cbSize = wapi.sizeof("TASKDIALOGCONFIG")
         config.hwndParent = wapi.NULL
         config.hInstance = wapi.NULL

@@ -7,7 +7,7 @@ import math
 from threading import Condition, Lock
 import time
 from types import TracebackType
-from typing import Callable, cast, Literal, Optional, Self, Sequence, TYPE_CHECKING, Union
+from typing import Any, Callable, cast, Literal, Optional, Self, Sequence, TYPE_CHECKING, Union
 from uuid import UUID
 
 from talon import app
@@ -194,7 +194,7 @@ class WinEventTracker:
                 #i This if-body may cause the event handler to be reentered.
 
                 iaccessible_address = wapi.new("void **")
-                acc_object_child_id_cffi_variant = wapi.new("VARIANT *")
+                acc_object_child_id_cffi_variant: Any = wapi.new("VARIANT *")
                 hresult = oleacc.AccessibleObjectFromEvent(
                     hwnd,
                     wapi.cast("DWORD", object_id),

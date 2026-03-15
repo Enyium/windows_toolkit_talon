@@ -9,7 +9,7 @@ import functools
 import textwrap
 from threading import Event, Lock, Thread
 import traceback
-from typing import Callable, cast, Optional, ParamSpec, TYPE_CHECKING, TypeAlias, TypeVar
+from typing import Any, Callable, cast, Optional, ParamSpec, TYPE_CHECKING, TypeAlias, TypeVar
 from uuid import UUID
 import weakref
 from weakref import ReferenceType
@@ -110,7 +110,7 @@ class MessageLoop:
         self = weak_self()
         assert type(self) is MessageLoop
 
-        msg = wapi.new("MSG *")
+        msg: Any = wapi.new("MSG *")
         user32.PeekMessageW(msg, wapi.NULL, 0, 0, user32.PM_NOREMOVE)
         #i "The functions that are guaranteed to create a message queue are `Peek­Message`, `Get­Message`, and `Create­Window`." (<https://devblogs.microsoft.com/oldnewthing/20241009-00/?p=110354>) But `GetMessageW()` blocks.
 
