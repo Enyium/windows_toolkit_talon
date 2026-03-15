@@ -452,6 +452,7 @@ class _Detector:
             False,
             toplevel_window.app.pid,
         ))
+        process_handle = wapi.cast("HANDLE", process_pyhandle.handle)
 
         plausibly_std_dialog = False
         try:
@@ -464,13 +465,13 @@ class _Detector:
             #i Maximum path *component* length as per <https://learn.microsoft.com/en-us/windows/win32/fileio/maximum-file-path-limitation>.
 
             for module_handle in module_handles:
-                success = kernel32.K32GetModuleBaseNameW(
-                    wapi.cast("HANDLE", process_pyhandle.handle),
+                utf16_length = kernel32.K32GetModuleBaseNameW(
+                    process_handle,
                     wapi.cast("HMODULE", module_handle),
                     filename_buffer,
                     len(filename_buffer),
                 )
-                if not success:
+                if not utf16_length:
                     last_error = kernel32.GetLastError()
                     if last_error == winerror.ERROR_INVALID_HANDLE:
                     #i When aggressively loading and unloading DLLs in a test process with a window, this was the only error that occurred; i.e., `EnumProcessModulesEx()` didn't fail. The error is obviously related to unloading a module; when a module was *loaded* while `EnumProcessModulesEx()` ran and wasn't returned, that case must be seen as similar to running this code a few milliseconds earlier when the module also wasn't loaded and apparently can't be handled the same as the unload case.
@@ -478,7 +479,7 @@ class _Detector:
                         return (UIFramework.PENDING, plausibly_std_dialog)
                     else:
                         raise ctypes.WinError(last_error)
-                filename = cast(str, wapi.string(filename_buffer)).lower()
+                filename = cast(str, wapi.string(filename_buffer, utf16_length)).lower()
 
                 if wants_gtk and _gtk_dll_regex.search(filename):
                     return (UIFramework.GTK, plausibly_std_dialog)
