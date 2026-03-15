@@ -158,6 +158,7 @@ class _InsertSession:
         self.__fill_gui_thread_info(may_retry=True)
 
         self.__insertion_toplevel_hwnd = self.__gui_thread_info.hwndActive
+        assert self.__insertion_toplevel_hwnd
         self.__insertion_hwnd = self.__get_insertion_hwnd(self.__gui_thread_info)
         #i Keyboard input may instead effectively go to yet a different menu window, owned by the top-level window, even though it's not reported as active or focused. It can be a Win32 menu window or from various UI frameworks.
 
@@ -319,6 +320,7 @@ class _InsertSession:
             )
             self.__flush_queue()
             if must_wait:
+                assert caret_tracker
                 caret_tracker.require_silence(self.__caret_still_duration, WAITING_EVENTS)
 
             #i If unbalanced down-events were possible after flushing, an emergency key-up would be needed in an `except` block after a large `try` block.
@@ -403,6 +405,7 @@ class _InsertSession:
         if insertion_hwnd != self.__insertion_hwnd:
             raise RuntimeError(f"Window changed during text insertion. Insertion aborted. Original HWND: `{self.__insertion_hwnd}`. Displacing HWND: `{insertion_hwnd}`.")
 
+        assert self.__interference_tracker
         if self.__interference_tracker.had((
             WinEvent.SYSTEM_MENUSTART,
             WinEvent.SYSTEM_MENUEND,
@@ -427,13 +430,14 @@ class _InsertSession:
 
         if num_events_sent != self.__num_events:
             # Best-effort emergency key-up. (Only as long as modifiers aren't involved additionally.)
+            event: Any = None
             try:
-                event: Any = self.__events[num_events_sent - 1]
+                event = self.__events[num_events_sent - 1]
             except IndexError:
                 pass
 
             extra_message = ""
-            if not (event.DUMMYUNIONNAME.ki.dwFlags & win32con.KEYEVENTF_KEYUP):
+            if event is not None and not (event.DUMMYUNIONNAME.ki.dwFlags & win32con.KEYEVENTF_KEYUP):
                 time.sleep(0.1)  # Failure may just be transient.
 
                 event.DUMMYUNIONNAME.ki.dwFlags |= win32con.KEYEVENTF_KEYUP
@@ -458,7 +462,7 @@ class _InsertSession:
 
             if self.__gui_thread_info.hwndActive:
                 return
-            elif not may_retry or time.perf_counter() >= deadline:
+            elif not may_retry or (deadline and time.perf_counter() >= deadline):
                 raise RuntimeError("No active window during text insertion.")
 
             time.sleep(0.005)

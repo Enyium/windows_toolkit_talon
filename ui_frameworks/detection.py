@@ -129,6 +129,7 @@ def _abort_retry() -> None:
 
 def _on_retry_job() -> None:
     with _lock:
+        assert _retry_window
         _update_scope(_retry_window)
 
 def _update_scope(toplevel_window: Window) -> None:
@@ -384,7 +385,7 @@ class _Detector:
                     raise
 
             if _MUST_LOG_CHILD_WINDOWS:
-                print(f"Child window: {'  visible' if is_visible else 'invisible'}, HWND {hwnd:#010x}, control ID {control_id:#06x}, class \"{child_class}\"")
+                print(f"Child window: {'  visible' if is_visible else 'invisible'}, HWND {hwnd:#010x}, control ID {control_id:#06x}, class \"{child_class}\"")  # pyright: ignore[reportPossiblyUnboundVariable]
 
             has_children = True
 
@@ -430,6 +431,7 @@ class _Detector:
         wants_gtk = possible_frameworks is None or UIFramework.GTK in possible_frameworks
         wants_any_framework = possible_frameworks is None or len(possible_frameworks) != 0
 
+        window_module_handle = None
         if wants_dialog_check:
             # Find out module that created the window.
             kernel32.SetLastError(winerror.ERROR_SUCCESS)

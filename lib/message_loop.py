@@ -107,28 +107,28 @@ class MessageLoop:
     @staticmethod
     def __thread_main(weak_self: ReferenceType["MessageLoop"]) -> None:
         # Initialize.
-        self = weak_self()
-        assert type(self) is MessageLoop
+        strong_self = weak_self()
+        assert type(strong_self) is MessageLoop
 
         msg: Any = wapi.new("MSG *")
         user32.PeekMessageW(msg, wapi.NULL, 0, 0, user32.PM_NOREMOVE)
         #i "The functions that are guaranteed to create a message queue are `Peek­Message`, `Get­Message`, and `Create­Window`." (<https://devblogs.microsoft.com/oldnewthing/20241009-00/?p=110354>) But `GetMessageW()` blocks.
 
-        call_weak(self.__weak_downstream_on_thread_created)
+        call_weak(strong_self.__weak_downstream_on_thread_created)
 
-        # # Keep available, even if `self` disappears. (The contructor forbade it to be a bound method.)
-        downstream_on_thread_exit = self.__downstream_on_thread_exit
+        # # Keep available, even if `strong_self` disappears. (The contructor forbade it to be a bound method.)
+        downstream_on_thread_exit = strong_self.__downstream_on_thread_exit
 
         #
         with _pymod_termination_hook.globals_teardown_deferrer:
             # Cause constructor to return.
-            self.__thread_ready.set()
-            del self
+            strong_self.__thread_ready.set()
+            del strong_self
 
             # Run loop.
-            def print_exception(self) -> None:
+            def print_exception(strong_self: MessageLoop) -> None:
                 print(
-                    f"ERROR: Unhandled exception in thread of {self.__label}:\n"
+                    f"ERROR: Unhandled exception in thread of {strong_self.__label}:\n"
                     + textwrap.indent(traceback.format_exc().rstrip(), "  ")
                 )
 
@@ -138,39 +138,46 @@ class MessageLoop:
                     raise ctypes.WinError(kernel32.GetLastError())
                 #i `GetMessageW()` internally calls registered callbacks like those from hooks.
 
-                self: MessageLoop = weak_self()
-                if not self or self.__must_quit_asap_event.is_set():
+                strong_self = weak_self()
+                if not strong_self:
+                    break
+
+                if strong_self.__must_quit_asap_event.is_set():
                     break
 
                 try:
                     if not msg.hwnd:  # Thread message.
                         match msg.message:
-                            case self.__unique_message_id:
-                                call_weak(self.__weak_downstream_on_unique_message, msg.wParam, msg.lParam)
+                            case strong_self.__unique_message_id:
+                                call_weak(
+                                    strong_self.__weak_downstream_on_unique_message,
+                                    msg.wParam,
+                                    msg.lParam,
+                                )
                             case user32.WM_QUIT:
                                 break
                 except BaseException:
-                    print_exception(self)
+                    print_exception(strong_self)
 
-                del self
+                del strong_self
 
             # Run exit callback.
-            self: MessageLoop = weak_self()
+            strong_self = weak_self()
 
             try:
                 if downstream_on_thread_exit:
                     downstream_on_thread_exit()
             except BaseException:
-                if self:
-                    print_exception(self)
+                if strong_self:
+                    print_exception(strong_self)
                 else:
                     raise
             finally:
-                if self:
+                if strong_self:
                     # Release any referenced objects.
-                    self.__downstream_on_thread_exit = None
+                    strong_self.__downstream_on_thread_exit = None
 
-            del self
+            del strong_self
 
     def post_unique(self, arg_1: int = 0, arg_2: int = 0) -> None:
         """Posts a unique message with the specified arguments to the message queue of the separate thread, after which your `on_unique_message()` callback will be called.

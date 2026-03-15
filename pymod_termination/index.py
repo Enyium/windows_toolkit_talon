@@ -55,6 +55,7 @@ def get_pymod_termination_hook(module_name: Optional[str] = None) -> Termination
         module_name = sys._getframe(1).f_globals["__name__"]
 
     try:
+        assert module_name
         module_object = sys.modules[module_name]
     except KeyError:
         raise ValueError(f"Couldn't find module with name `{module_name}`.")
@@ -240,6 +241,7 @@ class TerminationHook:
 
         # Clear module globals that may hold the module dict at any depth level.
         # (e.g., instance methods in their `__globals__` attribute)
+        assert self.__module_dict is not None
         attributes = list(self.__module_dict.keys())
         #i Copying avoids `RuntimeError` "dictionary changed size during iteration" when another thread edits the dictionary. Still, it should be arranged so that concurrent edits don't happen, which deferrers encourage.
 
@@ -258,9 +260,10 @@ class TerminationHook:
             )
             if not acceptable:
                 if _IS_DEBUGGING:
-                    cleared_attributes.append(attribute)
+                    cleared_attributes.append(attribute)  # pyright: ignore[reportPossiblyUnboundVariable]
 
                 objects_to_delete.append(value)
+                del value  # Relevant for last value.
 
                 self.__module_dict[attribute] = None
                 #i - Likely includes this class instance.
@@ -268,9 +271,8 @@ class TerminationHook:
                 #i - If useful, the objects could also be replaced with weak references to themselves.
 
         if _IS_DEBUGGING:
-            print(f"Clearing following globals of {self.__module_key}: {cleared_attributes}")
+            print(f"Clearing following globals of {self.__module_key}: {cleared_attributes}")  # pyright: ignore[reportPossiblyUnboundVariable]
 
-        del value
         del objects_to_delete
         #i The objects being deleted may reentrantly cause finalization and teardown of imported modules in the context of Talon reload chains.
         self.__module_dict = None

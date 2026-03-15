@@ -195,7 +195,10 @@ def _start_tracker() -> None:
     """The caller is responsible for locking."""
 
     global _tracker_cleanup_job, _tracker
+
     _tracker_cleanup_job = cron.after("5s", _on_tracker_cleanup_job)
+
+    assert _tracker is not None
     _tracker.__enter__()
 
 def _wait_for_winevents(win_events: Union[WinEvent, Sequence[WinEvent]], timeout: float) -> None:

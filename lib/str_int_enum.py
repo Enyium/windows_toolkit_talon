@@ -8,6 +8,8 @@ class StrCarryingOneBasedIntEnum(IntEnum):
     - While the instances behave like `int`s, stringifying them yields the strings you assigned.
     """
 
+    __string: str
+
     def __new__(cls, string: str) -> Self:
         value = len(cls) + 1
 

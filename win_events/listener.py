@@ -160,9 +160,9 @@ class WinEventListener:
         idEventThread: int,
         dwmsEventTime: int,
     ) -> None:
-        try:
-            tls = WinEventListener.__tls
+        tls = WinEventListener.__tls
 
+        try:
             with tls.lock:
                 if tls.is_shut_down_event.is_set():
                     return
