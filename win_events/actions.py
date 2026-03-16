@@ -1,5 +1,6 @@
+from collections.abc import Sequence
 from threading import Lock
-from typing import cast, Optional, Sequence, Union
+from typing import cast, Union
 
 from talon import actions, Context, cron, Module, settings, ui
 from talon.cron import Job
@@ -33,8 +34,8 @@ tag: user.wtk_tracking__active
 """  # pyright: ignore[reportAttributeAccessIssue]
 
 _lock = Lock()
-_tracker: Optional[WinEventTracker] = None
-_tracker_cleanup_job: Optional[Job] = None
+_tracker: WinEventTracker | None = None
+_tracker_cleanup_job: Job | None = None
 
 
 #TODO: WITH COMMUNITY PEOPLE: Have default actions in `community`, allowing users to install their tracker of choice that works for their OS? This would be similar to the default support of VS Code plus better support when installing the briding VS Code extension.
@@ -201,7 +202,7 @@ def _start_tracker() -> None:
     assert _tracker is not None
     _tracker.__enter__()
 
-def _wait_for_winevents(win_events: Union[WinEvent, Sequence[WinEvent]], timeout: float) -> None:
+def _wait_for_winevents(win_events: WinEvent | Sequence[WinEvent], timeout: float) -> None:
     global _tracker
 
     with _lock:

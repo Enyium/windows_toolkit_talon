@@ -4,6 +4,7 @@ This file makes the `user.ui_framework` Talon scope available that can be used f
 The assessments are cached in the windows themselves using window properties. Whenever Talon reloads this file, the assessments are reset (without removing the window properties).
 """
 
+from collections.abc import Callable
 import ctypes
 from enum import Enum, auto
 import re
@@ -11,7 +12,7 @@ import textwrap
 from threading import Lock
 import time
 import traceback
-from typing import Callable, cast, Optional, TYPE_CHECKING
+from typing import cast, TYPE_CHECKING
 
 from talon import Module, app, cron, ui
 from talon.windows.ui import Window
@@ -338,7 +339,7 @@ class _Detector:
     def __check_child_window_tree(
         self,
         toplevel_window: Window,
-        possible_frameworks: Optional[set[UIFramework]] = None,
+        possible_frameworks: set[UIFramework] | None = None,
     ) -> UIFramework:
         """Tries to recognize the top-level window's UI framework by its Win32 child window tree."""
 
@@ -422,7 +423,7 @@ class _Detector:
     def __check_module_filenames(
         self,
         toplevel_window: Window,
-        possible_frameworks: Optional[set[UIFramework]] = None,
+        possible_frameworks: set[UIFramework] | None = None,
         wants_dialog_check: bool = False,
     ) -> tuple[UIFramework, bool]:
         """Tries to recognize the process's UI framework by its module filenames (mostly DLLs).
@@ -433,7 +434,7 @@ class _Detector:
         wants_gtk = possible_frameworks is None or UIFramework.GTK in possible_frameworks
         wants_any_framework = possible_frameworks is None or len(possible_frameworks) != 0
 
-        window_module_handle: Optional[int] = None
+        window_module_handle: int | None = None
         if wants_dialog_check:
             # Find out module that created the window.
             kernel32.SetLastError(winerror.ERROR_SUCCESS)
@@ -507,7 +508,7 @@ class _Detector:
     def __check_uia_data(
         self,
         toplevel_window: Window,
-        possible_frameworks: Optional[set[UIFramework]] = None,
+        possible_frameworks: set[UIFramework] | None = None,
     ) -> UIFramework:
         """Tries to recognize the top-level window's UI framework by its UI Automation data."""
 
@@ -527,7 +528,7 @@ class _Detector:
         return UIFramework.UNKNOWN
 
 
-def _get_owner_window(window: Window) -> Optional[Window]:
+def _get_owner_window(window: Window) -> Window | None:
     try:
         owner_hwnd = win32gui.GetWindow(window.id, win32con.GW_OWNER)
     except pywintypes.error as e:

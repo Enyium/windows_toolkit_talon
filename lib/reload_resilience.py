@@ -4,7 +4,7 @@ A stepping stone to transfer objects between Talon script reloads. Reloading thi
 """
 
 from threading import Lock
-from typing import Any, Optional
+from typing import Any
 from uuid import UUID
 from weakref import WeakValueDictionary
 
@@ -20,7 +20,7 @@ def set_value(uuid4: UUID, value: Any) -> Any:
 
     return value
 
-def pop_value(uuid4: UUID, default: Any = _arg_missing_sentinel) -> Optional[Any]:
+def pop_value(uuid4: UUID, default: Any = _arg_missing_sentinel) -> Any | None:
     """Returns the set value. If it was already garbage-collected, returns `default` or raises a `KeyError`."""
 
     try:

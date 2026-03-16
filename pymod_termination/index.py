@@ -10,6 +10,7 @@ This module allows you to register callbacks that will be run after Talon script
 from __future__ import annotations
 
 from collections import deque
+from collections.abc import Callable
 from dataclasses import dataclass
 from enum import auto, Enum
 import gc
@@ -18,7 +19,7 @@ import textwrap
 from threading import Lock, RLock
 import traceback
 from types import ModuleType, NoneType, TracebackType
-from typing import Any, Callable, Literal, Optional, ParamSpec, Self, TypeAlias, TypeVar
+from typing import Any, Literal, ParamSpec, Self, TypeAlias, TypeVar
 import weakref
 
 from ..lib.weak import WeakCallback, to_weak_callback
@@ -38,7 +39,7 @@ _ACCEPTABLE_TYPES = frozenset((NoneType, bool, int, float, complex, range, bytes
 _hooks_dict_lock = Lock()
 _hooks_by_module_keys: dict[_ModuleKey, TerminationHook] = {}
 
-def get_pymod_termination_hook(module_name: Optional[str] = None) -> TerminationHook:
+def get_pymod_termination_hook(module_name: str | None = None) -> TerminationHook:
     """Returns an object that you can use
 
     - to register callbacks for when the Python module object is garbage-collected;
@@ -93,7 +94,7 @@ class TerminationHook:
 
         self.__lock = RLock()
         self.__module_key = module_key
-        self.__module_dict: Optional[dict[str, Any]] = module_object.__dict__
+        self.__module_dict: dict[str, Any] | None = module_object.__dict__
         self.__module_object_finalized = False
         self.__weak_on_finalize_callbacks: TerminationHook.__WeakCallbackQueue = deque()
         self.__torn_down = False
@@ -302,10 +303,10 @@ class TeardownDeferrer:
 
     def __exit__(
         self,
-        exc_type: Optional[type[BaseException]],
-        exc_value: Optional[BaseException],
-        traceback: Optional[TracebackType],
-    ) -> Optional[Literal[True]]:
+        exc_type: type[BaseException] | None,
+        exc_value: BaseException | None,
+        traceback: TracebackType | None,
+    ) -> Literal[True] | None:
         if not self.__entered:
             raise RuntimeError("`__exit__()` without previous `__enter__()`.")
         if self.__hook is None:

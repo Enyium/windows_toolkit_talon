@@ -1,9 +1,10 @@
 # import builtins
+# from collections.abc import Mapping, Sequence
 # import functools
 # from pathlib import Path
 # import traceback
 # from types import ModuleType
-# from typing import cast, Mapping, Optional, Sequence
+# from typing import cast
 # import win32api
 # 
 # from .py_module_termination import get_pymod_termination_hook
@@ -18,14 +19,14 @@
 # @functools.wraps(_original_import)
 # def _patched_import(
 #     name: str,
-#     globals: Optional[Mapping[str, object]] = None,
-#     locals: Optional[Mapping[str, object]] = None,
-#     fromlist: Optional[Sequence[str]] = (),
+#     globals: Mapping[str, object] | None = None,
+#     locals: Mapping[str, object] | None = None,
+#     fromlist: Sequence[str] | None = (),
 #     level: int = 0,
 # ) -> ModuleType:
 #     try:
 #         if globals is not None:
-#             importer_module_name = cast(Optional[str], globals.get("__name__"))
+#             importer_module_name = cast(str | None, globals.get("__name__"))
 #             if importer_module_name is not None and importer_module_name.startswith("user."):
 #                 get_pymod_termination_hook(importer_module_name)
 #     except BaseException:

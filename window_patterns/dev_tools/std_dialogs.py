@@ -2,6 +2,7 @@
 Shows Windows standard dialogs for the purpose of investigating them with regard to writing dialog recognition code and for testing that code.
 """
 
+from collections.abc import Callable
 import ctypes
 import os
 from pathlib import Path
@@ -9,7 +10,7 @@ import subprocess
 import sys
 import tempfile
 from threading import Thread
-from typing import Any, Callable, TextIO
+from typing import Any, TextIO
 import win32con
 import win32api
 

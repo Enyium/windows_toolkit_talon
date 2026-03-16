@@ -5,7 +5,7 @@ Reimplements Talon's `insert()` function and provides Talon settings that allow 
 from contextlib import nullcontext
 import ctypes
 import time
-from typing import Any, cast, Optional, TYPE_CHECKING
+from typing import Any, cast, TYPE_CHECKING
 
 from talon import Context, Module, app, settings
 
@@ -143,9 +143,9 @@ class _InsertSession:
         self.__num_events: int = 0
 
         self.__gui_thread_info: Any = wapi.new("GUITHREADINFO *", {"cbSize": wapi.sizeof("GUITHREADINFO")})
-        self.__insertion_toplevel_hwnd: Optional[CData] = None
-        self.__insertion_hwnd: Optional[CData] = None
-        self.__interference_tracker: Optional[WinEventTracker] = None
+        self.__insertion_toplevel_hwnd: CData | None = None
+        self.__insertion_hwnd: CData | None = None
+        self.__interference_tracker: WinEventTracker | None = None
 
     def __call__(self, text: str) -> None:
         if not text:

@@ -3,13 +3,14 @@ Classes to get a Win32 message loop.
 """
 
 from collections import deque
+from collections.abc import Callable
 from concurrent.futures import BrokenExecutor, Executor, Future, InvalidStateError
 import ctypes
 import functools
 import textwrap
 from threading import Event, Lock, Thread
 import traceback
-from typing import Any, Callable, cast, Optional, ParamSpec, TYPE_CHECKING, TypeAlias, TypeVar
+from typing import Any, cast, ParamSpec, TYPE_CHECKING, TypeAlias, TypeVar
 from uuid import UUID
 import weakref
 from weakref import ReferenceType
@@ -54,9 +55,9 @@ class MessageLoop:
         self,
         instance_uuid4: UUID,
         *,
-        on_thread_created: Optional[Callable[[], None]] = None,
-        on_unique_message: Optional[Callable[[int, int], None]] = None,
-        on_thread_exit: Optional[Callable[[], None]] = None,
+        on_thread_created: Callable[[], None] | None = None,
+        on_unique_message: Callable[[int, int], None] | None = None,
+        on_thread_exit: Callable[[], None] | None = None,
     ) -> None:
         """
         - When you return from `on_thread_created()`, the constructor will still not have returned.
@@ -256,8 +257,8 @@ class MessageLoopExecutor(Executor):
         self,
         instance_uuid4: UUID,
         *,
-        on_thread_created: Optional[Callable[[], None]] = None,
-        on_thread_exit: Optional[OnThreadExitCallback] = None,
+        on_thread_created: Callable[[], None] | None = None,
+        on_thread_exit: OnThreadExitCallback | None = None,
     ) -> None:
         """See `MessageLoop` for information about the arguments."""
 
@@ -313,7 +314,7 @@ class MessageLoopExecutor(Executor):
         func: Callable[P, T],
         /,
         *args: P.args,
-        timeout: Optional[float] = None,  # pyright: ignore[reportGeneralTypeIssues]
+        timeout: float | None = None,  # pyright: ignore[reportGeneralTypeIssues]
         **kwargs: P.kwargs,
     ) -> T:
         """Convenience function that synchronously calls a function in the message loop thread by calling `submit()` and waiting for the `Future` to complete."""
@@ -358,7 +359,7 @@ class MessageLoopExecutor(Executor):
 
     @staticmethod
     def __on_thread_exit(
-        downstream_on_thread_exit: Optional[OnThreadExitCallback],
+        downstream_on_thread_exit: OnThreadExitCallback | None,
         lock: Lock,
         is_shut_down_event: Event,
         pending_jobs: __PendingJobsDeque,

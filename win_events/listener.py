@@ -3,7 +3,7 @@ import textwrap
 import threading
 from threading import Event, RLock
 import traceback
-from typing import Optional, Protocol, TYPE_CHECKING, Union
+from typing import Protocol, TYPE_CHECKING
 from uuid import UUID
 
 from talon import app
@@ -68,9 +68,9 @@ class WinEventListener:
 
     def subscribe(
         self,
-        events: Union[WinEvent, slice],
-        process_id: Optional[int] = None,
-        thread_id: Optional[int] = None,
+        events: WinEvent | slice,
+        process_id: int | None = None,
+        thread_id: int | None = None,
         *,
         on_winevent: OnWinEventCallback,
     ) -> int:
@@ -89,9 +89,9 @@ class WinEventListener:
 
     def __set_hook(
         self,
-        events: Union[WinEvent, slice],
-        process_id: Optional[int],
-        thread_id: Optional[int],
+        events: WinEvent | slice,
+        process_id: int | None,
+        thread_id: int | None,
         on_winevent: OnWinEventCallback,
     ) -> CData:
         with self.__lock:
