@@ -1,5 +1,6 @@
-from cffi import FFI
 from typing import Any, cast
+
+from cffi import FFI
 
 wapi = FFI()
 CData = wapi.CData

@@ -1,5 +1,6 @@
-from cffi import FFI
 from typing import Any
+
+from cffi import FFI
 
 from ...lib import winapi as lib_winapi
 

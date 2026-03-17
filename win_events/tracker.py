@@ -1,32 +1,26 @@
 from __future__ import annotations
 
+import ctypes
+import math
+import time
 from collections import deque
 from collections.abc import Callable, Sequence
-import ctypes
 from dataclasses import dataclass, field
-import math
 from threading import Condition, Lock
-import time
 from types import TracebackType
-from typing import Any, cast, Literal, Self, TYPE_CHECKING
+from typing import Any, Literal, Self, cast
 from uuid import UUID
 
-from talon import app
+import pythoncom
+import win32com.client
+import win32con
+import win32gui
+import winerror
 
 from ..lib import reload_resilience
-
-if app.platform == "windows" or TYPE_CHECKING:
-    import pythoncom
-    import win32com.client
-    import win32con
-    import win32gui
-    import winerror
-
-    from ..lib.winapi import CData, kernel32, oleacc, user32, wapi
-    from .listener import WinEventListener
-    from .constants import WinEvent, Role
-else:
-    raise NotImplementedError("Unsupported OS.")
+from ..lib.winapi import CData, kernel32, oleacc, user32, wapi
+from .constants import Role, WinEvent
+from .listener import WinEventListener
 
 _script_main_callbacks: deque[Callable[[], None]] = deque()
 

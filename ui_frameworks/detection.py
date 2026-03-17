@@ -4,34 +4,28 @@ This file makes the `user.ui_framework` Talon scope available that can be used f
 The assessments are cached in the windows themselves using window properties. Whenever Talon reloads this file, the assessments are reset (without removing the window properties).
 """
 
-from collections.abc import Callable
 import ctypes
-from enum import Enum, auto
 import re
 import textwrap
-from threading import Lock
 import time
 import traceback
-from typing import cast, TYPE_CHECKING
+from collections.abc import Callable
+from enum import Enum, auto
+from threading import Lock
+from typing import cast
 
+import pywintypes
+import win32api
+import win32con
+import win32gui
+import win32process
+import winerror
 from talon import Module, app, cron, ui
+from talon.windows import ax
 from talon.windows.ui import Window
 
+from ..lib.winapi import kernel32, user32, w, wapi
 from .enum import UIFramework
-
-if app.platform == "windows" or TYPE_CHECKING:
-    import pywintypes
-    import win32api
-    import win32con
-    import win32gui
-    import win32process
-    import winerror
-
-    from talon.windows import ax
-
-    from ..lib.winapi import kernel32, user32, w, wapi
-else:
-    raise NotImplementedError("Unsupported OS.")
 
 # Debug flags.
 _MUST_LOG_ASSESSMENT = False

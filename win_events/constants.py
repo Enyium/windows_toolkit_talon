@@ -1,14 +1,9 @@
 from enum import IntEnum
-from typing import Self, TYPE_CHECKING
+from typing import Self
 
-from talon import app
+import win32con
 
-if app.platform == "windows" or TYPE_CHECKING:
-    import win32con
-
-    from ..lib.winapi import oleacc, user32
-else:
-    raise NotImplementedError("Unsupported OS.")
+from ..lib.winapi import oleacc, user32
 
 
 class _FromStrMixin:

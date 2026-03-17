@@ -1,23 +1,17 @@
 import functools
 import textwrap
 import threading
-from threading import Event, RLock
 import traceback
-from typing import Protocol, TYPE_CHECKING
+from threading import Event, RLock
+from typing import Protocol
 from uuid import UUID
 
-from talon import app
+import win32con
 
+from ..lib.message_loop import MessageLoopExecutor
 from ..lib.weak import WeakCallback, to_weak_callback
+from ..lib.winapi import CData, user32, wapi
 from .constants import WinEvent
-
-if app.platform == "windows" or TYPE_CHECKING:
-    import win32con
-
-    from ..lib.message_loop import MessageLoopExecutor
-    from ..lib.winapi import CData, user32, wapi
-else:
-    raise NotImplementedError("Unsupported OS.")
 
 
 class WinEventListener:

@@ -1,11 +1,11 @@
 from collections.abc import Sequence
 from threading import Lock
-from typing import cast, Union
+from typing import Union, cast
 
-from talon import actions, Context, cron, Module, settings, ui
+from talon import Context, Module, actions, cron, settings, ui
 from talon.cron import Job
 
-from .constants import WinEvent, ObjectID
+from .constants import ObjectID, WinEvent
 from .tracker import Subfilter, WinEventTracker
 
 _mod = Module()

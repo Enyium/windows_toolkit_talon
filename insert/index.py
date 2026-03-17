@@ -2,23 +2,19 @@
 Reimplements Talon's `insert()` function and provides Talon settings that allow it to be configured.
 """
 
-from contextlib import nullcontext
 import ctypes
 import time
-from typing import Any, cast, TYPE_CHECKING
+from contextlib import nullcontext
+from typing import Any, cast
 
-from talon import Context, Module, app, settings
+import win32api
+import win32con
+import winerror
+from talon import Context, Module, settings
 
-if app.platform == "windows" or TYPE_CHECKING:
-    import win32api
-    import win32con
-    import winerror
-
-    from ..lib.winapi import CData, kernel32, user32, wapi
-    from ..win_events.tracker import Subfilter, WinEventTracker
-    from ..win_events.constants import WinEvent, ObjectID, Role
-else:
-    raise NotImplementedError("Unsupported OS.")
+from ..lib.winapi import CData, kernel32, user32, wapi
+from ..win_events.constants import ObjectID, Role, WinEvent
+from ..win_events.tracker import Subfilter, WinEventTracker
 
 _mod = Module()
 

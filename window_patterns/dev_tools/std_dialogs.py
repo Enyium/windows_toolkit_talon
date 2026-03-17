@@ -2,17 +2,18 @@
 Shows Windows standard dialogs for the purpose of investigating them with regard to writing dialog recognition code and for testing that code.
 """
 
-from collections.abc import Callable
 import ctypes
 import os
-from pathlib import Path
 import subprocess
 import sys
 import tempfile
+from collections.abc import Callable
+from pathlib import Path
 from threading import Thread
 from typing import Any, TextIO
-import win32con
+
 import win32api
+import win32con
 
 from ...lib.winapi import w
 from .. import dlgcon

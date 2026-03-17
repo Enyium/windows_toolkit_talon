@@ -1,6 +1,7 @@
 from enum import IntEnum
 from typing import Self
 
+
 class StrCarryingOneBasedIntEnum(IntEnum):
     """An enum with the following features:
     - You assign strings to members, but the class auto-assigns integers with step size 1.

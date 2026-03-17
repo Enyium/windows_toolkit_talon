@@ -9,18 +9,18 @@ This module allows you to register callbacks that will be run after Talon script
 
 from __future__ import annotations
 
-from collections import deque
-from collections.abc import Callable
-from dataclasses import dataclass
-from enum import auto, Enum
 import gc
 import sys
 import textwrap
-from threading import Lock, RLock
 import traceback
+import weakref
+from collections import deque
+from collections.abc import Callable
+from dataclasses import dataclass
+from enum import Enum, auto
+from threading import Lock, RLock
 from types import ModuleType, NoneType, TracebackType
 from typing import Any, Literal, ParamSpec, Self, TypeAlias, TypeVar
-import weakref
 
 from ..lib.weak import WeakCallback, to_weak_callback
 

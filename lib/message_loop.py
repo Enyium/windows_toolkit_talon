@@ -2,33 +2,27 @@
 Classes to get a Win32 message loop.
 """
 
-from collections import deque
-from collections.abc import Callable
-from concurrent.futures import BrokenExecutor, Executor, Future, InvalidStateError
 import ctypes
 import functools
 import textwrap
-from threading import Event, Lock, Thread
 import traceback
-from typing import Any, cast, ParamSpec, TYPE_CHECKING, TypeAlias, TypeVar
-from uuid import UUID
 import weakref
+from collections import deque
+from collections.abc import Callable
+from concurrent.futures import BrokenExecutor, Executor, Future, InvalidStateError
+from threading import Event, Lock, Thread
+from typing import Any, ParamSpec, TypeAlias, TypeVar, cast
+from uuid import UUID
 from weakref import ReferenceType
 
-from talon import app
+import winerror
 
 from ..pymod_termination.index import get_pymod_termination_hook
 from .weak import call_weak, to_weak_callback
+from .winapi import kernel32, user32, wapi
 
 T = TypeVar("T")
 P = ParamSpec("P")
-
-if app.platform == "windows" or TYPE_CHECKING:
-    import winerror
-
-    from .winapi import kernel32, user32, wapi
-else:
-    raise NotImplementedError("Unsupported OS.")
 
 _pymod_termination_hook = get_pymod_termination_hook()
 

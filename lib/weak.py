@@ -1,6 +1,6 @@
+import weakref
 from collections.abc import Callable
 from typing import ParamSpec, TypeAlias, TypeVar
-import weakref
 from weakref import ReferenceType, WeakMethod
 
 P = ParamSpec("P")

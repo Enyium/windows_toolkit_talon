@@ -1,5 +1,6 @@
 from ..lib.str_int_enum import StrCarryingOneBasedIntEnum
 
+
 class UIFramework(StrCarryingOneBasedIntEnum):
     # Special variants.
     UNKNOWN = "unknown"
