@@ -74,22 +74,25 @@ rad14 = 0x042d
 rad15 = 0x042e
 rad16 = 0x042f
 
-# # Groups, frames, rectangles, and icons.
+# # Groups.
 grp1 = 0x0430
 grp2 = 0x0431
 grp3 = 0x0432
 grp4 = 0x0433
 
+# # Frames.
 frm1 = 0x0434
 frm2 = 0x0435
 frm3 = 0x0436
 frm4 = 0x0437
 
+# # Rectangles.
 rct1 = 0x0438
 rct2 = 0x0439
 rct3 = 0x043a
 rct4 = 0x043b
 
+# # Icons.
 ico1 = 0x043c
 ico2 = 0x043d
 ico3 = 0x043e
