@@ -145,7 +145,7 @@ class _UserActions:
 @_mod.action_class
 class _TestActions:
     @staticmethod
-    def private_wtk_test_win_event_tracker() -> None:
+    def priv_wtk__test_win_event_tracker() -> None:
         """Simple test for the `WinEventTracker` class."""
 
         caret_tracker = WinEventTracker(
@@ -175,7 +175,7 @@ class _TestActions:
             print("Done waiting.")
 
     @staticmethod
-    def private_wtk_test_wait_for_focus() -> None:
+    def priv_wtk__test_wait_for_focus() -> None:
         """Test for the `user.wait_for_focus()` action."""
 
         import time

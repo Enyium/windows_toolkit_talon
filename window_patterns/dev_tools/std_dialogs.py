@@ -29,7 +29,7 @@ def _script_main() -> None:
             from talon import Module
 
             @Module().action
-            def wtk_show_std_dialogs() -> None:
+            def wtk__show_std_dialogs() -> None:
                 """Shows the standard dialogs that the code currently defines to show, so you can investigate them with spy tools or test the code that is meant to recognize them."""
                 _show_dialogs()
 
