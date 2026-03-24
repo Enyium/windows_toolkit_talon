@@ -65,10 +65,16 @@ _mod.setting(
     desc=r"""Whether the setting `user.wtk_insert__caret_still_ms` applies before `"\N{ESC}"`. This may make Esc reliable in dismissing suggestion overlays.""",
 )
 _mod.setting(
+    "wtk_insert__caret_still_before_last_char",
+    type=bool,
+    default=False,
+    desc="Whether the setting `user.wtk_insert__caret_still_ms` applies before the last character of the text insertion. This is useful when the fast insertion of previous text leaves the text box in an incorrect state (like, e.g., with wavy red underlining to incorrectly indicate an error) that is rectified by calm insertion of the final character. The setting is only applied for text with 2 or more characters.",
+)
+_mod.setting(
     "wtk_insert__caret_still_at_end",
     type=bool,
     default=True,
-    desc="Whether the setting `user.wtk_insert__caret_still_ms` applies at the end of the text insertion. This is useful to ensure a settled state for follow-up voice commands.",
+    desc="Whether the setting `user.wtk_insert__caret_still_ms` applies at the end of the text insertion. This is useful to ensure a settled state for follow-up voice commands. When `user.wtk_insert__caret_still_before_last_char` is also set, `insert()` still waits for caret standstill, but this waiting duration is shortened.",
 )
 
 _ctx = Context()
@@ -108,6 +114,7 @@ class _MainActions:
         - `user.wtk_insert__caret_still_before_enter`
         - `user.wtk_insert__caret_still_before_backspace`
         - `user.wtk_insert__caret_still_before_esc`
+        - `user.wtk_insert__caret_still_before_last_char`
         - `user.wtk_insert__caret_still_at_end`
         """
 
@@ -133,6 +140,7 @@ class _InsertSession:
         self.__must_wait_before_enter = cast(bool, settings.get("user.wtk_insert__caret_still_before_enter"))
         self.__must_wait_before_backspace = cast(bool, settings.get("user.wtk_insert__caret_still_before_backspace"))
         self.__must_wait_before_esc = cast(bool, settings.get("user.wtk_insert__caret_still_before_esc"))
+        self.__must_wait_before_last_char = cast(bool, settings.get("user.wtk_insert__caret_still_before_last_char"))
         self.__must_wait_at_end = cast(bool, settings.get("user.wtk_insert__caret_still_at_end"))
 
         self.__events: Any = None
@@ -184,6 +192,8 @@ class _InsertSession:
             ),
         )
 
+        must_wait_before_last_char = self.__must_wait_before_last_char and len(text) >= 2
+
         caret_tracker = (
             WinEventTracker(
                 Subfilter(
@@ -213,6 +223,7 @@ class _InsertSession:
                     or self.__must_wait_before_enter
                     or self.__must_wait_before_backspace
                     or self.__must_wait_before_esc
+                    or must_wait_before_last_char
                     or self.__must_wait_at_end
                 )
             )
@@ -237,7 +248,9 @@ class _InsertSession:
             did_enqueue = False
             had_supp_char = False
 
-            for code_point in map(ord, text):
+            last_char_index_to_wait_before = len(text) - 1 if must_wait_before_last_char else None
+
+            for index, code_point in enumerate(map(ord, text)):
                 # Determine event properties.
                 is_supp_char = code_point >= 0x10000
 
@@ -279,10 +292,14 @@ class _InsertSession:
                     and (
                         (self.__must_wait_before_supp_char and not had_supp_char and is_supp_char)
                         or must_wait_before_vk
+                        or index == last_char_index_to_wait_before
                     )
                 ):
                     self.__flush_queue()
                     caret_tracker.require_silence(self.__caret_still_duration, WAITING_EVENTS)
+
+                    if index == last_char_index_to_wait_before:
+                        caret_tracker.reset_wait_start()
 
                 if self.__must_yield_time:
                     self.__flush_queue()
@@ -314,10 +331,18 @@ class _InsertSession:
                 and self.__num_events > 1
                 #i A single event must be an up-event, and waiting for an up-event shouldn't be necessary, because apps generally only insert characters on down-events.
             )
+            may_shorten_wait = (
+                must_wait_before_last_char  # Did wait before last character.
+                and self.__num_events <= 2  # Single character or key.
+            )
             self.__flush_queue()
             if must_wait:
                 assert caret_tracker
-                caret_tracker.require_silence(self.__caret_still_duration, WAITING_EVENTS)
+                if may_shorten_wait:
+                    # Shorten final wait to speed up `insert()` chains.
+                    caret_tracker.wait(WAITING_EVENTS, timeout=self.__caret_still_duration)
+                else:
+                    caret_tracker.require_silence(self.__caret_still_duration, WAITING_EVENTS)
 
             #i If unbalanced down-events were possible after flushing, an emergency key-up would be needed in an `except` block after a large `try` block.
 
