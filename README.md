@@ -26,10 +26,12 @@ With keyboard input simulation, interacting with suggestion overlays (or respect
 
 # Known Issues
 
-- Some text-inserting voice commands from the `community` repository insert one small segment (like a character) at a time, be it using the `key()` action, which has its fixed waiting duration, or the overridden `insert()` action, which waits for caret standstill on every call, slowing insertion down. `community` should consolidate the segments more. As part of the solution, the author uses the following voice command (needs a `user.concat()` implementation; Talon may be slow after a certain number of consolidated characters, like `community`'s "uppercase..." voice command):
-  ```talon
-  <user.any_alphanumeric_key> <user.any_alphanumeric_key>+: insert(user.concat(any_alphanumeric_key_list))
-  ```
+- `insert()` override:
+  - In many GTK apps, Unicode supplementary characters (> U+FFFF, often emojis) are ignored. (Same for Talon's original `insert()`. Bug report [filed](https://gitlab.gnome.org/GNOME/gtk/-/issues/8121).)
+  - Some text-inserting voice commands from the `community` repository insert one small segment (like a character) at a time, be it using the `key()` action, which has its fixed waiting duration, or the overridden `insert()` action, which waits for caret standstill on every call, slowing insertion down. `community` should consolidate the segments more. As part of the solution, the author uses the following voice command (needs a `user.concat()` implementation; Talon may be slow after a certain number of consolidated characters, like `community`'s "uppercase..." voice command):
+    ```talon
+    <user.any_alphanumeric_key> <user.any_alphanumeric_key>+: insert(user.concat(any_alphanumeric_key_list))
+    ```
 - Because of a bug in Talon v0.4 where .py files are reloaded in incorrect order, triggering certain reload chains brings the code into an inconsistent state. This can, e.g., happen when editing a file or using Git to update the repository. Talon's log may then show strange errors (e.g., because of interop of a new Python module instance with an old Python module instance). Restarting Talon (or triggering reloads of the files in the correct order) solves the issue.
 
 # Code
