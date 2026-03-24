@@ -43,7 +43,9 @@ class UIFramework(StrCarryingOneBasedIntEnum):
 
     GTK = "GTK"
     """- Originally "GIMP Toolkit"
-    - Apps: Inkscape, Qalculate (one variant), Czkawka"""
+    - GTK 2 apps: Pidgin v2.14, GIMP v2, gtk-demo
+    - GTK 3 apps: Inkscape v1.4, Geany v2.1, Qalculate v5.9 (GTK variant), gtk3-demo
+    - GTK 4 apps: Gaphor, Pinta, Rnote, gtk4-demo"""
 
     JAVA_FX = "JavaFX"
     """Apps: AsciidocFX, PDFsam Basic"""
