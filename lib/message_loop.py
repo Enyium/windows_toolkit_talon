@@ -27,6 +27,7 @@ P = ParamSpec("P")
 _pymod_termination_hook = get_pymod_termination_hook()
 
 
+#TODO: LATE: Add callback `on_thread_message()` for other thread messages. The OS sends `WM_TIMER` and `WM_HOTKEY`, e.g., and the user could use `PostThreadMessage()` themselves.
 #TODO: LATE: The following list of events/event providers could be useful. A new class would be needed that provides an interface using Talon's `dispatch.pyi`. `MessageLoop` would need an invisible window to receive messages that's created if the handler `on_window_message` is passed (not a message-only window, because these don't receive broadcast messages).
 #      - WTSRegisterSessionNotification()
 #      - [Power management functions](https://learn.microsoft.com/en-us/windows/win32/power/power-management-functions)
