@@ -62,7 +62,7 @@ _WINRT_XAML_CHILD_CLASSES = frozenset((
 ))
 
 # # Filenames of loaded modules (DLLs). (Input is lowercased.)
-_gtk_dll_regex = re.compile(r"^libgtk-[\d.-]+\.dll$")
+_gtk_dll_regex = re.compile(r"(?x) ^libgtk (?:-win32)? -(?:[1-9](?=[.-]))[\d.-]* \.dll$")
 
 # Pending-state resolution.
 _retry_job = None
