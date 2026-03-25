@@ -245,9 +245,7 @@ class _InsertSession:
 
         # Send events batchwise.
         with self.__interference_tracker, caret_tracker or nullcontext():
-            did_enqueue = False
             had_supp_char = False
-
             last_char_index_to_wait_before = len(text) - 1 if must_wait_before_last_char else None
 
             for index, code_point in enumerate(map(ord, text)):
@@ -282,21 +280,23 @@ class _InsertSession:
                         continue
 
                 # Flush regularly, so checks aren't delayed for too long.
+                effectively_flushed = False
                 if self.__num_events >= CODE_UNITS_PER_FLUSH_HINT * 2:
-                    self.__flush_queue()
+                    effectively_flushed = self.__flush_queue()
 
                 # Wait.
                 if (
-                    did_enqueue
-                    and caret_tracker
+                    caret_tracker
                     and (
                         (self.__must_wait_before_supp_char and not had_supp_char and is_supp_char)
                         or must_wait_before_vk
                         or index == last_char_index_to_wait_before
                     )
                 ):
-                    self.__flush_queue()
-                    caret_tracker.require_silence(self.__caret_still_duration, WAITING_EVENTS)
+                    if not effectively_flushed:
+                        effectively_flushed = self.__flush_queue()
+                    if effectively_flushed:
+                        caret_tracker.require_silence(self.__caret_still_duration, WAITING_EVENTS)
 
                     if index == last_char_index_to_wait_before:
                         caret_tracker.reset_wait_start()
@@ -314,8 +314,6 @@ class _InsertSession:
                         for up in (False, True):
                             self.__enqueue_utf16_code_unit_event(code_unit, up)
 
-                did_enqueue = True
-
                 # Prevent OS session becoming unusable due to overly long runtime.
                 if time.perf_counter() > self.__deadline:
                     raise TimeoutError("Text insertion took too long.")
@@ -325,8 +323,7 @@ class _InsertSession:
 
             # Final batch.
             must_wait = (
-                did_enqueue
-                and caret_tracker
+                caret_tracker
                 and self.__must_wait_at_end
                 and self.__num_events > 1
                 #i A single event must be an up-event, and waiting for an up-event shouldn't be necessary, because apps generally only insert characters on down-events.
@@ -335,8 +332,9 @@ class _InsertSession:
                 must_wait_before_last_char  # Did wait before last character.
                 and self.__num_events <= 2  # Single character or key.
             )
-            self.__flush_queue()
-            if must_wait:
+
+            effectively_flushed = self.__flush_queue()
+            if effectively_flushed and must_wait:
                 assert caret_tracker
                 if may_shorten_wait:
                     # Shorten final wait to speed up `insert()` chains.
@@ -413,11 +411,11 @@ class _InsertSession:
 
         self.__num_events += 1
 
-    def __flush_queue(self) -> None:
-        """Checks on a best-effort basis whether the insertion target changed or there's an interfering state like pressed modifier keys, and then sends the queued events via `SendInput()`."""
+    def __flush_queue(self) -> bool:
+        """Checks on a best-effort basis whether the insertion target changed or there's an interfering state like pressed modifier keys, and then sends the queued events via `SendInput()`. Returns whether anything was sent."""
 
         if self.__num_events <= 0:
-            return
+            return False
 
         # Check for various obstacles.
         self.__fill_gui_thread_info()
@@ -471,6 +469,9 @@ class _InsertSession:
 
         # Reset event queue with regard to next flush.
         self.__num_events = 0
+
+        #
+        return True
 
     def __fill_gui_thread_info(self, may_retry: bool = False) -> None:
         """Fetches the `GUITHREADINFO` for the current foreground thread and saves it in the instance. Optionally retries repeatedly until a brief timeout elapsed to compensate for window activation in progress (observed null window handle when closing Notepad)."""
