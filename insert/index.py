@@ -3,6 +3,7 @@ Reimplements Talon's `insert()` function and provides Talon settings that allow 
 """
 
 import ctypes
+import math
 import time
 from contextlib import nullcontext
 from typing import Any, cast
@@ -356,25 +357,48 @@ class _InsertSession:
         Blocks until the target thread is in its Win32 message loop again to give it time to process previous events, which may have been transferred to a UI-framework-specific message loop. This is relevant in Qt apps that tend to insert Unicode supplementary characters from later in the event stream before earlier BMP characters. It's *especially* relevant in the output pane of Qt-based gImageReader v3.4.3 where each new character initiates a text check; it's worse with longer text box contents. In Qt apps, without yielding, there can also be problems with the very first insertion of text containing supplementary characters after app start.
         """
 
-        #i As per the `GetMessageW()` docs' remarks, sent messages are processed before all other events by default.
+        #i `GetMessageW()` and `PeekMessageW()` in the target thread process sent messages during their call without returning, which means they're unaffected by range filters, and prioritize them before other kinds of messages.
 
-        kernel32.SetLastError(winerror.ERROR_SUCCESS)
-        success = bool(user32.SendMessageTimeoutW(
-            insertion_hwnd,
-            win32con.WM_NULL,
-            0,
-            0,
-            win32con.SMTO_BLOCK | user32.SMTO_ERRORONEXIT,
-            #i `SMTO_ABORTIFHUNG` is indicated by failure return value, but not by a specific error code. Since this case is rare, a fitting exception message is hard to phrase and blocking seems natural in this case, the `SMTO_ABORTIFHUNG` flag isn't used.
-            2000,  # ms
-            wapi.NULL,
-        ))
-        if not success:
-            last_error: int = kernel32.GetLastError()
-            if last_error == winerror.ERROR_TIMEOUT:
-                raise TimeoutError("Window took too long to react while yielding during text insertion.")
+        deadline = time.perf_counter() + 2
+        # num_waits = 0
+
+        while True:
+            block_time = time.perf_counter()
+
+            timeout_ms = math.ceil((deadline - block_time) * 1000)
+            if timeout_ms <= 0:
+                kernel32.SetLastError(winerror.ERROR_TIMEOUT)
+                success = False
             else:
-                raise ctypes.WinError(last_error)
+                kernel32.SetLastError(winerror.ERROR_SUCCESS)
+                success = bool(user32.SendMessageTimeoutW(
+                    insertion_hwnd,
+                    win32con.WM_NULL,
+                    0,
+                    0,
+                    win32con.SMTO_BLOCK | user32.SMTO_ERRORONEXIT,
+                    #i `SMTO_ABORTIFHUNG` is indicated by failure return value, but not by a specific error code. Since this case is rare, a fitting exception message is hard to phrase and blocking seems natural in this case, the `SMTO_ABORTIFHUNG` flag isn't used.
+                    timeout_ms,  # 0 doesn't cause immediate timeout error.
+                    wapi.NULL,
+                ))
+            if not success:
+                last_error: int = kernel32.GetLastError()
+                if last_error == winerror.ERROR_TIMEOUT:
+                    raise TimeoutError("Window took too long to react while yielding during text insertion.")
+                else:
+                    raise ctypes.WinError(last_error)
+
+            # num_waits += 1
+
+            blocking_duration = time.perf_counter() - block_time
+            # print(f"Blocking duration: {blocking_duration * 1000:.3f} ms")
+            if blocking_duration < 0.001:  # Tweakable.
+                break
+
+            #. Try to ensure the target thread processes any queued messages between the previous and next `WM_NULL` message.
+            time.sleep(0.000_100)  # May be systematically longer (like 0.2-1.6 ms). Tweakable.
+
+        # print(f"Number of waits: {num_waits}")  # Avg. `print()` runtime for author: 0.6 ms.
 
     def __enqueue_vk_event(self, vk: int, up: bool) -> None:
         scancode = cast(int, win32api.MapVirtualKey(vk, user32.MAPVK_VK_TO_VSC_EX))  # Typed incompletely.
