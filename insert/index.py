@@ -187,9 +187,15 @@ class _InsertSession:
         # Set up win event trackers.
         self.__interference_tracker = WinEventTracker(
             Subfilter(
-                slice(WinEvent.SYSTEM_MENUSTART, WinEvent.SYSTEM_MENUPOPUPEND),
-                #i Can be somewhat out of order (seen in Firefox v149 with persistent menu bar). The Microsoft docs also talk about this to some degree.
+                slice(WinEvent.SYSTEM_MENUSTART, WinEvent.SYSTEM_MENUEND),
+                role=Role.MENUBAR,
             ),
+            Subfilter(
+                slice(WinEvent.SYSTEM_MENUPOPUPSTART, WinEvent.SYSTEM_MENUPOPUPEND),
+                role=Role.MENUPOPUP,
+            ),
+            #i - The events can be somewhat out of order (seen in Firefox v149 with persistent menu bar). The Microsoft docs also talk about this to some degree.
+            #i - The roles are used because VS Code v1.111 strangely emits the events when typing into the text box of the Command Center, find box, and rename-symbol overlay. AccEvent shows an error for the role, though, which makes the role filter suited for exclusion of these cases.
         )
 
         must_wait_before_last_char = self.__must_wait_before_last_char and len(text) >= 2
