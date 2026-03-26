@@ -27,6 +27,25 @@ With keyboard input simulation, interacting with suggestion overlays (or respect
 # Known Issues
 
 - `insert()` override:
+  - As of Feb. 2026, [Rango](https://rango.click/) tries to type the text of ineffective hints via `actions.insert()`. This can impair control of web apps like YouTube. To correct this, change the following in Rango's [`/src/response.py`](https://github.com/david-tejada/rango-talon/blob/main/src/response.py#L33):
+    ```py
+                case "typeTargetCharacters":
+                    actions.insert(request_action["target"]["mark"]["value"])
+    ```
+
+    ...to this:
+
+    ```py
+                case "typeTargetCharacters":
+                    text = request_action["target"]["mark"]["value"]
+
+                    # Ensure web apps remain controllable using letter or number keys when the user installed an `insert()` override that's not based on key events.
+                    if text.isalnum() and text.isascii():
+                        for ch in text:
+                            actions.key(ch)
+                    else:
+                        actions.insert(text)
+    ```
   - In many GTK apps, Unicode supplementary characters (> U+FFFF, often emojis) are ignored. (Same for Talon's original `insert()`. Bug report [filed](https://gitlab.gnome.org/GNOME/gtk/-/issues/8121).)
   - Some text-inserting voice commands from the `community` repository insert one small segment (like a character) at a time, be it using the `key()` action, which has its fixed waiting duration, or the overridden `insert()` action, which waits for caret standstill on every call, slowing insertion down. `community` should consolidate the segments more. As part of the solution, the author uses the following voice command (needs a `user.concat()` implementation; Talon may be slow after a certain number of consolidated characters, like `community`'s "uppercase..." voice command):
     ```talon
