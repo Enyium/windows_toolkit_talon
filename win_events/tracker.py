@@ -12,6 +12,7 @@ from typing import Any, Literal, Self, cast
 from uuid import UUID
 
 import pythoncom
+import pywintypes
 import win32com.client
 import win32con
 import win32gui
@@ -203,7 +204,7 @@ class WinEventTracker:
                     #     print(f"ERROR: `AccessibleObjectFromEvent()` call ended with error HRESULT 0x{hresult & 0xFFFF_FFFF:08X}. Arguments: hwnd = {hwnd}, object_id = {object_id}, child_id = {child_id}. event = {event}.")
 
                     if hresult == winerror.E_INVALIDARG or hresult == winerror.E_FAIL:
-                    #i Errors that were encountered, but didn't appear to have a clear, avoidable cause.
+                    #i Errors that were encountered, but didn't appear to have a clear, avoidable cause. Perhaps, it can have to do with the object not being available anymore.
                         return  # Filters can't match.
                     else:
                         raise ctypes.WinError(hresult)
@@ -233,10 +234,17 @@ class WinEventTracker:
                         acc_object_child_id_cffi_variant._VARIANT_NAME_1._VARIANT_NAME_2._VARIANT_NAME_3.lVal,
                     )
 
-                    if subfilter.role is not None:
-                        role: int = acc_object.GetaccRole(acc_object_child_id_variant)
-                        if role != subfilter.role:
-                            return
+                    try:
+                        if subfilter.role is not None:
+                            role: int = acc_object.GetaccRole(acc_object_child_id_variant)
+                            if role != subfilter.role:
+                                return
+                    except pywintypes.com_error as e:
+                        scode = e.excepinfo[5]  # pyright: ignore[reportAttributeAccessIssue]
+                        if scode == winerror.E_INVALIDARG or scode == winerror.E_FAIL:
+                            return  # Filters can't match.
+                        else:
+                            raise ctypes.WinError(scode)  # An `HRESULT` in the author's experience.
 
                 if self.__num_events_by_events.get(event, 0) > num_events:
                     # Forget this event, because its now old.
