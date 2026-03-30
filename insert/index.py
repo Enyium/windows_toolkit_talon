@@ -153,7 +153,7 @@ class _InsertSession:
         self.__interference_tracker: WinEventTracker | None = None
 
     def __call__(self, text: str) -> None:
-        if not text:
+        if text == "":
             return
         #i TalonScript code sometimes contains `insert(capture or "")`.
 
@@ -223,7 +223,7 @@ class _InsertSession:
                 #i Note that apps' UIs and their signaling of win events may not be in sync. E.g., in VS Code v1.109.5, the sent text may already be presented while `OBJECT_LOCATIONCHANGE` events continue to arrive for a moment, making caret waits appear longer. In Notepad of Windows 11 Home 25H2, the arrival of win events may already have ceased while text still continues to appear, visually smoothing out caret waits that were actually longer than they appeared to be. (Printing on win event reception is better than using AccEvent to understand this effect.)
             )
             if (
-                self.__caret_still_duration
+                self.__caret_still_duration > 0
                 and (
                     self.__must_wait_before_supp_char
                     or self.__must_wait_before_tab
@@ -293,7 +293,7 @@ class _InsertSession:
 
                 # Wait.
                 if (
-                    caret_tracker
+                    caret_tracker is not None
                     and (
                         (self.__must_wait_before_supp_char and not had_supp_char and is_supp_char)
                         or must_wait_before_vk
@@ -512,7 +512,7 @@ class _InsertSession:
             if not success:
                 raise ctypes.WinError(kernel32.GetLastError())
 
-            if self.__gui_thread_info.hwndActive:
+            if self.__gui_thread_info.hwndActive != wapi.NULL:
                 return
             elif not may_retry or (deadline and time.perf_counter() >= deadline):
                 raise RuntimeError("No active window during text insertion.")
