@@ -52,8 +52,7 @@ class _Actions:
             user.wait_for_window_activation("300ms")
         """
 
-        if True:
-            pass
+        actions.skip()
 
     @staticmethod
     def wait_for_window_activation(fixed_fallback_duration: Union[float, str]) -> None:
@@ -72,8 +71,7 @@ class _Actions:
             user.wait_for_focus("100ms")
         """
 
-        if True:
-            pass
+        actions.skip()
 
     @staticmethod
     def wait_for_focus(fixed_fallback_duration: Union[float, str]) -> None:
