@@ -29,6 +29,10 @@ With keyboard input simulation, interacting with suggestion overlays (or respect
 # Known Issues
 
 - `insert()` override:
+  - Some text-inserting voice commands from the [`community` repository](https://github.com/talonhub/community) insert one small segment (like a character) at a time, be it using the `key()` action, which has its fixed waiting duration, or the overridden `insert()` action, which waits for caret standstill on every call, slowing insertion down. `community` should consolidate the segments more. As part of the solution, the author uses the following voice command in [`community/core/keys/keys.talon`](https://github.com/talonhub/community/blob/main/core/keys/keys.talon) (needs a [`user.concat()` implementation](https://github.com/Enyium/windows_toolkit_talon/discussions/1); Talon may be slow after a certain number of consolidated characters, like with `community`'s "uppercase..." voice command or when spelling out numbers digit by digit):
+    ```talon
+    <user.any_alphanumeric_key> <user.any_alphanumeric_key>+: insert(user.concat(any_alphanumeric_key_list))
+    ```
   - As of Feb. 2026, [Rango](https://rango.click/) tries to type the text of ineffective hints via `actions.insert()`. This can impair control of web apps like YouTube. To correct this, change the following in Rango's [`/src/response.py`](https://github.com/david-tejada/rango-talon/blob/main/src/response.py#L33):
     ```py
                 case "typeTargetCharacters":
@@ -47,10 +51,6 @@ With keyboard input simulation, interacting with suggestion overlays (or respect
                             actions.key(ch)
                     else:
                         actions.insert(text)
-    ```
-  - Some text-inserting voice commands from the [`community` repository](https://github.com/talonhub/community) insert one small segment (like a character) at a time, be it using the `key()` action, which has its fixed waiting duration, or the overridden `insert()` action, which waits for caret standstill on every call, slowing insertion down. `community` should consolidate the segments more. As part of the solution, the author uses the following voice command (needs a `user.concat()` implementation; Talon may be slow after a certain number of consolidated characters, like with `community`'s "uppercase..." voice command):
-    ```talon
-    <user.any_alphanumeric_key> <user.any_alphanumeric_key>+: insert(user.concat(any_alphanumeric_key_list))
     ```
   - In many GTK apps, Unicode supplementary characters (> U+FFFF, often emojis) are ignored. (Same for Talon's original `insert()`. Bug report [filed](https://gitlab.gnome.org/GNOME/gtk/-/issues/8121).)
 - Because of a bug in Talon v0.4 where .py files are reloaded in incorrect order, triggering certain reload chains brings the code into an inconsistent state. This can, e.g., happen when editing a file or using Git to update the repository. Talon's log may then show strange errors (e.g., because of interop of a new Python module instance with an old Python module instance). Restarting Talon (or triggering reloads of the files in the correct order) solves the issue.
